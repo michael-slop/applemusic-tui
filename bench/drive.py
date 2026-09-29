@@ -27,6 +27,10 @@ PLAY_ALBUM = """(async()=>{const mk=MusicKit.getInstance();mk.volume=0;
  const r=await mk.api.music('/v1/catalog/'+(mk.storefrontId||'us')+'/search',{term:%s,types:'albums',limit:1});
  const id=r.data.results.albums.data[0].id; await mk.setQueue({album:id,startPlaying:true}); mk.volume=0; return id})()"""
 
+PLAY_PLAYLIST = """(async()=>{const mk=MusicKit.getInstance();mk.volume=0;
+ const r=await mk.api.music('/v1/catalog/'+(mk.storefrontId||'us')+'/search',{term:%s,types:'playlists',limit:1});
+ const id=r.data.results.playlists.data[0].id; await mk.setQueue({playlist:id,startPlaying:true}); mk.volume=0; return id})()"""
+
 def main():
     cmd = sys.argv[1]
     if cmd == "wait-authed":
@@ -39,6 +43,8 @@ def main():
         sys.exit("timeout waiting for authed")
     if cmd == "play-album":
         print(asyncio.run(ev(PLAY_ALBUM % json.dumps(sys.argv[2])))); return
+    if cmd == "play-playlist":
+        print(asyncio.run(ev(PLAY_PLAYLIST % json.dumps(sys.argv[2])))); return
     if cmd == "eval":
         print(asyncio.run(ev(sys.argv[2]))); return
     print(asyncio.run(ev(CMDS[cmd])))

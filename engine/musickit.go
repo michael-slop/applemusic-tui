@@ -252,8 +252,9 @@ const repeatJS = `(() => {
   return true;
 })()`
 
-// Jump by walking the already-resolved queue. A skip changes queue.position in
-// ~50 ms but its Promise may never settle, so observe position directly.
+// Jump straight to the target with changeToMediaAtIndex; if that is missing or
+// never lands, walk the already-resolved queue. A skip changes queue.position
+// in ~50 ms but its Promise may never settle, so observe position directly.
 // Repeated Enter updates one pending target instead of spawning races.
 const jumpJS = `(() => {
   ` + trapJS + playerWaitJS + `
@@ -268,6 +269,32 @@ const jumpJS = `(() => {
   const jump = async () => {
     try {
       await waitForColdStart(mk);
+      // Direct path: one changeToMediaAtIndex call loads only the target track
+      // (stepping loads, and DRM-licenses, every track in between). Its promise
+      // may never settle either, so watch the position like the fallback does.
+      // A new Enter while waiting just retargets.
+      if (typeof mk.changeToMediaAtIndex === 'function') {
+        let direct = true;
+        for (let attempt = 0; direct && attempt < 5; attempt++) {
+          const target = window.__amtuiJumpTarget | 0;
+          const queue = mk.queue;
+          if (!queue || target < 0 || target >= queue.items.length) {
+            throw new Error('jump target left the queue');
+          }
+          if ((queue.position | 0) === target) return;
+          try {
+            trap('jump')(mk.changeToMediaAtIndex(target));
+            await waitFor(
+              () => (window.__amtuiJumpTarget | 0) !== target ||
+                (!!mk.queue && (mk.queue.position | 0) === target),
+              5000,
+              'jump'
+            );
+          } catch (e) {
+            direct = false; // fall back to stepping from wherever we are
+          }
+        }
+      }
       let guard = 0;
       while (guard++ < 200) {
         const target = window.__amtuiJumpTarget | 0;

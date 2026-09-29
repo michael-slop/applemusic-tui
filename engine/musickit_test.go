@@ -344,6 +344,48 @@ func TestJumpWaitsForColdPlaybackAndDoesNotAwaitSkipPromise(t *testing.T) {
 	t.Fatalf("jump remained slow with pending MusicKit promises: position=%d", pos)
 }
 
+func TestJumpUsesChangeToMediaAtIndexWithoutStepping(t *testing.T) {
+	ctx := testPage(t)
+	eval(t, ctx, `(() => {
+	  const state = window.__mock = { pos: 0, skips: 0, direct: [] };
+	  const queue = {
+	    items: new Array(50).fill(0).map(() => ({})),
+	    get position() { return state.pos; },
+	  };
+	  const mk = {
+	    queue,
+	    services: { mediaItemPlayback: { _currentPlayer: {} } },
+	    changeToMediaAtIndex(i) {
+	      state.direct.push(i);
+	      setTimeout(() => { state.pos = i; }, 30);
+	      return new Promise(() => {}); // like MusicKit: may never settle
+	    },
+	    skipToNextItem() { state.skips++; return new Promise(() => {}); },
+	    skipToPreviousItem() { state.skips++; return new Promise(() => {}); },
+	  };
+	  window.MusicKit = { getInstance: () => mk };
+	})()`, nil)
+
+	var ok bool
+	eval(t, ctx, fmt.Sprintf(jumpJS, 40), &ok)
+	deadline := time.Now().Add(700 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		var pos int
+		eval(t, ctx, `window.__mock.pos`, &pos)
+		if pos == 40 {
+			var skips, calls int
+			eval(t, ctx, `window.__mock.skips`, &skips)
+			eval(t, ctx, `window.__mock.direct.length`, &calls)
+			if skips != 0 || calls != 1 {
+				t.Fatalf("direct jump used skips=%d direct calls=%d, want 0 and 1", skips, calls)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("direct jump never reached index 40")
+}
+
 func TestPauseLetsMusicKitPauseBeforeNativeFallback(t *testing.T) {
 	ctx := testPage(t)
 	eval(t, ctx, `(() => {
