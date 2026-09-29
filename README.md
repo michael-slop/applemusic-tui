@@ -53,6 +53,12 @@ What changed:
   (`v` / `V` cycle; `go run ./bench/fxdemo <name> 80 24 10` runs one alone
   against live audio). Each keeps its panefx look at reactivity 0 and
   answers the music above it; colours follow the theme.
+- **The music drives the motion.** Every animation's clock runs at the
+  music's pace: nearly still (4% speed) when paused or silent, easing to full
+  speed as the song gets loud, so on and off are obvious at a glance.
+- **Spectrum shaping** — the torus's trick for the effects: flames and fire
+  (mirrored, bass in the centre), the tunnel wall (floor bass to ceiling
+  treble) and waves (across the width) are shaped by all 32 bands at once.
 - **Reactivity slider** (`[` / `]`). The analyzer's fixed dB scale is right
   for the bars (an honest EQ) but left loud masters sitting high and flat, so
   shapes barely moved (measured band wobble 0.02–0.12). Animations now use a
@@ -63,6 +69,10 @@ What changed:
   keeps it (saved as `custom`), esc restores.
 - **Lyrics panel collapses** when a track has none; the visualizer takes the
   column (`lyrics.collapse_when_missing = false` to keep it).
+- **No 4 MB parser churn.** lipgloss borrows an ANSI parser with a 4 MB
+  buffer from a pool that every GC empties; per-frame Width()/per-cell
+  renders re-allocated it constantly. Hot paths now write colour codes
+  directly (byte-identical, tested): CPU per frame roughly halved.
 - **No log lines over the TUI.** chromedp's messages (e.g. Chrome 154's new
   `DOM.topLayerElementsUpdated`) go to `~/.config/amtui/amtui.log`.
 
