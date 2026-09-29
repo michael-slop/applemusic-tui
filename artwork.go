@@ -6,12 +6,15 @@ import (
 	_ "image/jpeg" // Apple serves JPEG artwork
 	_ "image/png"  // …but decode PNG too rather than fail
 	"net/http"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // artworkPx is the fetch size, and so the ceiling on the cover's detail: a
@@ -109,6 +112,45 @@ func (c *artCache) put(key string, img image.Image) {
 // the glyph's foreground paints the upper pixel and its background the lower
 // one, so every cell carries two vertical pixels.
 func renderArtwork(img image.Image, w, h int) []string {
+	// A cover never changes once decoded, but the view is rebuilt up to 30
+	// times a second; rendering it from scratch every frame (one lipgloss style
+	// and two hex-colour parses per cell) was the single largest CPU cost.
+	if img == nil || w <= 0 || h <= 0 || reflect.TypeOf(img).Kind() != reflect.Pointer {
+		return renderArtworkUncached(img, w, h)
+	}
+	key := artRenderKey{img: img, w: w, h: h, profile: lipgloss.ColorProfile()}
+	artRenderMu.Lock()
+	rows, ok := artRenderCache[key]
+	artRenderMu.Unlock()
+	if ok {
+		return rows
+	}
+	rows = renderArtworkUncached(img, w, h)
+	artRenderMu.Lock()
+	if len(artRenderCache) >= artRenderCacheMax {
+		clear(artRenderCache) // covers + tiles on screen fit easily; just start over
+	}
+	artRenderCache[key] = rows
+	artRenderMu.Unlock()
+	return rows
+}
+
+// artRenderKey identifies one rendering: the same decoded image (by pointer),
+// at the same size, for the same terminal colour profile.
+type artRenderKey struct {
+	img     image.Image
+	w, h    int
+	profile termenv.Profile
+}
+
+const artRenderCacheMax = 64
+
+var (
+	artRenderMu    sync.Mutex
+	artRenderCache = map[artRenderKey][]string{}
+)
+
+func renderArtworkUncached(img image.Image, w, h int) []string {
 	if img == nil || w <= 0 || h <= 0 {
 		return nil
 	}
