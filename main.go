@@ -889,10 +889,10 @@ func (m model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // pad truncates/pads a styled line to exactly w columns.
 func pad(s string, w int) string {
-	if lipgloss.Width(s) > w {
+	if cellWidth(s) > w {
 		s = lipgloss.NewStyle().MaxWidth(w).Render(s)
 	}
-	return s + strings.Repeat(" ", max(0, w-lipgloss.Width(s)))
+	return s + strings.Repeat(" ", max(0, w-cellWidth(s)))
 }
 
 func centeredRows(s string, w, rows int) string {
@@ -916,9 +916,7 @@ func panel(title, body string, w, h int, focused bool, accentNow lipgloss.Color)
 	}
 	head := lipgloss.NewStyle().Foreground(tc).Bold(true).Render(" " + title)
 	content := pad(head, w) + "\n" + body
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).BorderForeground(bc).
-		Width(w).Height(h).Render(content)
+	return borderedBox(content, w, h, bc)
 }
 
 func (m model) queuePanel(w, h int) string {
@@ -1492,15 +1490,15 @@ func (m model) View() string {
 	left := panel(m.queueTitle(), m.queuePanel(lay.qw, lay.qh), lay.qw, lay.qh,
 		m.focus == focusQueue, m.pulsedAccent())
 	if lay.recH > 0 {
-		left = lipgloss.JoinVertical(lipgloss.Left, left,
+		left = joinVerticalLeft(left,
 			panel(m.recentTitle(), m.recentPanel(lay.qw, lay.recH-2), lay.qw, lay.recH-2,
 				m.focus == focusRecent, m.pulsedAccent()))
 	}
 	viz := panel(m.visualizerTitle(), m.vizPanel(lay.vw, lay.vh-2), lay.vw, lay.vh-2,
 		false, m.pulsedAccent())
 	lyr := panel("LYRICS", m.lyricsPanel(lay.vw, lay.lh), lay.vw, lay.lh, false, m.pulsedAccent())
-	right := lipgloss.JoinVertical(lipgloss.Left, viz, lyr)
-	top := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	right := joinVerticalLeft(viz, lyr)
+	top := joinHorizontalTop(left, right)
 
 	tw := m.w - 2
 	transport := lipgloss.NewStyle().
@@ -1508,7 +1506,7 @@ func (m model) View() string {
 		BorderForeground(map[bool]lipgloss.Color{true: m.pulsedAccent(), false: borderDim}[m.focus == focusPlayer]).
 		Width(tw).Render(m.transportPanel(tw))
 
-	return lipgloss.JoinVertical(lipgloss.Left, top, transport)
+	return joinVerticalLeft(top, transport)
 }
 
 // version is stamped at build time with -ldflags "-X main.version=...".

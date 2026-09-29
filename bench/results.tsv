@@ -1,2 +1,3 @@
 13:27	baseline	play_amtui=35.1%	play_chrome=4.4%	pause_amtui=35.8%	pause_chrome=0.6%	amtui_rss=35MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
 13:33	art-cache+idle-pacing	play_amtui=25.1%	play_chrome=4.5%	pause_amtui=7.8%	pause_chrome=0.6%	amtui_rss=45MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
+13:38	+fast-panels	play_amtui=11.1%	play_chrome=4.5%	pause_amtui=4.2%	pause_chrome=0.5%	amtui_rss=76MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
