@@ -47,6 +47,25 @@ What changed:
   actually saved instead of being lost on the restart.
 - **Windows.** Real visualizer via WASAPI loopback capture, a PowerShell
   installer, and Windows-safe tests.
+- **The panefx animations.** Sixteen ASCII effects ported from
+  [panefx](https://github.com/michael-slop) — flames, fire, rain, waves,
+  plasma, tunnel, starfield, cube, galaxy, skullspin, warlockspin,
+  wizardtorch, tgevil, wzfire, raalien, fishloop — as visualizer modes
+  (`v` / `V` cycle; `go run ./bench/fxdemo <name> 80 24 10` runs one alone
+  against live audio). Each keeps its panefx look at reactivity 0 and
+  answers the music above it; colours follow the theme.
+- **Reactivity slider** (`[` / `]`). The analyzer's fixed dB scale is right
+  for the bars (an honest EQ) but left loud masters sitting high and flat, so
+  shapes barely moved (measured band wobble 0.02–0.12). Animations now use a
+  per-band "change against its own recent average" signal (wobble ~0.3) and
+  one slider, 0–100 %, scales how hard every animation answers.
+- **Hidden colour controller** (`?` then `c`). Pick a preset — including the
+  house `slop` palette — or tune any of the eight slots in HSL, live; enter
+  keeps it (saved as `custom`), esc restores.
+- **Lyrics panel collapses** when a track has none; the visualizer takes the
+  column (`lyrics.collapse_when_missing = false` to keep it).
+- **No log lines over the TUI.** chromedp's messages (e.g. Chrome 154's new
+  `DOM.topLayerElementsUpdated`) go to `~/.config/amtui/amtui.log`.
 
 ## Why amtui
 
@@ -339,6 +358,13 @@ In `config.toml`:
 ```toml
 [browser]
 sleep_after_minutes = 10   # close the hidden browser after this long paused; 0 = never
+
+[visualizer]
+reactive = true            # animations use the per-band reactive signal (false = absolute levels)
+reactivity = 50            # starting point for the [ ] slider, 0-100
+
+[lyrics]
+collapse_when_missing = true
 ```
 
 ## License
