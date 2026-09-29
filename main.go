@@ -169,7 +169,8 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
-	lyCollapsed bool // no lyrics for this track: the visualizer takes the lyrics rows
+	colors      colorEditor // the hidden colour controller (? then c)
+	lyCollapsed bool        // no lyrics for this track: the visualizer takes the lyrics rows
 	// browser sleep (see sleep.go)
 	engRef        *atomic.Pointer[engine.Engine] // what MPRIS controls act on
 	mprisWake     chan wakeIntent
@@ -802,8 +803,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Any key dismisses help, and that key does nothing else — reading the
 		// list should never fire the command you were looking up.
+		if m.colors.open {
+			return m.updateColors(msg)
+		}
 		if m.helpOpen {
 			m.helpOpen = false
+			if msg.String() == "c" { // the hidden way in to the colour controller
+				m.openColors()
+			}
 			return m, nil
 		}
 		if m.acctOpen {
@@ -1577,6 +1584,9 @@ func (m model) View() string {
 	if m.phase != phaseReady {
 		return m.bootView()
 	}
+	if m.colors.open {
+		return m.colorsView()
+	}
 	if m.helpOpen {
 		return m.helpView()
 	}
@@ -1639,6 +1649,7 @@ func main() {
 	m.vizMode = loadVizMode()
 	m.scrobbler = newScrobbler(m.cfg)
 	m.artCache = newArtCache(8)
+	loadCustomTheme()
 	t := themeFromConfig(m.cfg, loadThemeName())
 	m.themeName = t.name
 	applyTheme(t)

@@ -35,6 +35,9 @@ var themes = []theme{
 	{"gruvbox", "#FB4934", "#FE8019", "#9D0006", "#EBDBB2", "#A89984", "#7C6F64", "#504945", "#3C3836"},
 	{"nord", "#88C0D0", "#8FBCBB", "#5E81AC", "#ECEFF4", "#D8DEE9", "#7B88A1", "#434C5E", "#3B4252"},
 	{"mono", "#E5E5E5", "#FFFFFF", "#7A7A7A", "#F5F5F5", "#9A9A9A", "#6A6A6A", "#3A3A3A", "#2A2A2A"},
+	// slop: the house palette (slop/pkg/theme Dark) -- spectral green over bone
+	// and stone, deepening to the flame ramp's teal.
+	{"slop", "#62E670", "#C8FFD0", "#3D8FA8", "#D8D4C4", "#ACA4C8", "#5C6470", "#26333F", "#1A2430"},
 	{"auto", "#FA233B", "#FB5C74", "#8A1E30", "#F2F2F7", "#8E8E93", "#5A5A5E", "#3A3A3C", "#2C2C2E"},
 }
 
