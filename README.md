@@ -47,10 +47,10 @@ What changed:
   actually saved instead of being lost on the restart.
 - **Windows.** Real visualizer via WASAPI loopback capture, a PowerShell
   installer, and Windows-safe tests.
-- **The panefx animations.** Sixteen ASCII effects ported from
-  [panefx](https://github.com/michael-slop) — flames, fire, rain, waves,
-  plasma, tunnel, starfield, cube, galaxy, skullspin, warlockspin,
-  wizardtorch, tgevil, wzfire, raalien, fishloop — as visualizer modes
+- **The panefx animations.** ASCII effects ported from
+  [panefx](https://github.com/michael-slop) — flames, fire, waves, plasma,
+  tunnel, starfield, cube, galaxy, skullspin, warlockspin, wizardtorch,
+  tgevil, wzfire, raalien — as visualizer modes
   (`v` / `V` cycle; `go run ./bench/fxdemo <name> 80 24 10` runs one alone
   against live audio). Each keeps its panefx look at reactivity 0 and
   answers the music above it; colours follow the theme.
