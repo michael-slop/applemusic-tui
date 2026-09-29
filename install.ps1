@@ -18,7 +18,7 @@
 param(
   [string]$Prefix = (Join-Path $env:LOCALAPPDATA "Programs\amtui"),
   [string]$Binary = "",                 # install this exe instead of building/downloading
-  [string]$Repo = "michaelslop/applemusic-tui",
+  [string]$Repo = "michael-slop/applemusic-tui",
   [switch]$NoPath
 )
 $ErrorActionPreference = "Stop"

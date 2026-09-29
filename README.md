@@ -143,7 +143,7 @@ through the system mixer (the web player serves AAC 256; no lossless).
 ### Windows
 
 ```powershell
-git clone https://github.com/michaelslop/applemusic-tui
+git clone https://github.com/michael-slop/applemusic-tui
 cd applemusic-tui
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
