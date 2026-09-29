@@ -92,21 +92,92 @@ type (
 	}
 )
 
-func tick() tea.Cmd {
-	return tea.Tick(time.Second/30, func(t time.Time) tea.Msg { return tickMsg(t) })
+func tick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// stepFrame advances everything that animates by one 30 fps frame.
+func (m *model) stepFrame(now time.Time) tea.Cmd {
+	var visualizerClose tea.Cmd
+	m.t += 1.0 / 30
+	if m.phase == phaseReady && m.st.Playing && m.st.Pos < m.st.Dur {
+		m.st.Pos += time.Second / 30 // optimistic between polls
+	}
+	if m.loading != "" && m.t-m.loadStart > 12 && !m.audioInitializing() {
+		m.loading = "" // give up quietly
+	}
+	if m.audioInitializing() && m.initTimerActive &&
+		m.t-m.initStart > 30 && m.note != audioInitializingWarning {
+		m.note, m.noteAt = audioInitializingWarning, m.t
+	}
+	if m.note != "" && m.t-m.noteAt > 6 &&
+		!(m.audioInitializing() && m.note == audioInitializingWarning) {
+		m.note = ""
+	}
+	if m.vizService != nil {
+		service := m.vizService
+		if service.Err() != nil {
+			m.failVisualizer()
+			visualizerClose = closeVisualizerCmd(service)
+		} else if frame, ok := service.Latest(); ok {
+			if visualizerFrameStale(now, frame.At) {
+				m.vizTargets = [32]float64{}
+			} else {
+				m.vizTargets = frame.Bands
+				m.vizLive = frame.Live
+				m.vizSource = frame.Source
+				m.vizOpening = false
+			}
+		}
+	}
+	if m.vizLive {
+		for i := range m.vizBands {
+			m.vizBands[i] += (m.vizTargets[i] - m.vizBands[i]) * 0.45
+		}
+	} else if !m.vizOpening {
+		m.vizBands = simulatedBands(m.t, m.st.Playing)
+	} else {
+		m.vizBands = [32]float64{}
+	}
+	decayPeaks(&m.vizPeaks, m.vizBands)
+	m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
+	m.orbSpin, m.orbWobble = orbAdvance(m.orbSpin, m.orbWobble, m.orbKick)
+	if m.st.Dur > 0 && m.st.Playing {
+		m.wv.record(float64(m.st.Pos)/float64(m.st.Dur), bandsLevel(m.vizBands))
+	}
+	scrobble := m.advanceScrobble(time.Second / 30)
+	return tea.Batch(visualizerClose, scrobble)
+}
+
+// Redraw rates. Rebuilding the view is amtui's main CPU cost, so run at full
+// rate only while something is actually moving.
+const (
+	activeFrameInterval = time.Second / 30
+	idleFrameInterval   = time.Second / 5
+)
+
+// frameInterval picks the next tick: full rate while music plays (visualizer,
+// progress, lyrics) or anything is loading, a slow idle rate otherwise.
+func (m model) frameInterval() time.Duration {
+	if m.phase != phaseReady || m.st.Playing || m.loading != "" ||
+		m.audioInitializing() || m.vizOpening {
+		return activeFrameInterval
+	}
+	return idleFrameInterval
 }
 
 type model struct {
-	w, h   int
-	t      float64 // seconds since start, drives animation
-	phase  phase
-	status string
-	note   string
-	noteAt float64 // m.t when the note was set; expires after 6s
-	eng    *engine.Engine
-	st     engine.State
-	focus  int // 0 queue, 1 recent, 2 player
-	selIdx int
+	lastFrame time.Time // when the previous tick ran; paces idle catch-up
+	w, h      int
+	t         float64 // seconds since start, drives animation
+	phase     phase
+	status    string
+	note      string
+	noteAt    float64 // m.t when the note was set; expires after 6s
+	eng       *engine.Engine
+	st        engine.State
+	focus     int // 0 queue, 1 recent, 2 player
+	selIdx    int
 
 	// recently played, shown as a cover grid under the queue
 	recent    []engine.Track
@@ -415,7 +486,7 @@ func (m model) fetchTileArtCmds() []tea.Cmd {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), connectCmd(m.statusCh), listenStatus(m.statusCh))
+	return tea.Batch(tick(activeFrameInterval), connectCmd(m.statusCh), listenStatus(m.statusCh))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -426,62 +497,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focus = focusPlayer // the grid just shrank out of the layout
 		}
 	case tickMsg:
-		var visualizerClose tea.Cmd
 		now := time.Time(msg)
-		m.t += 1.0 / 30
-		if m.phase == phaseReady && m.st.Playing && m.st.Pos < m.st.Dur {
-			m.st.Pos += time.Second / 30 // optimistic between polls
+		// Animations are tuned per 30 fps frame. When the view is idle the
+		// tick slows down, so catch the state up by however many frames of
+		// real time passed; only the (expensive) redraw rate drops.
+		frames := 1
+		if !m.lastFrame.IsZero() {
+			frames = int(now.Sub(m.lastFrame).Seconds()*30 + 0.5)
+			frames = min(max(frames, 1), 30)
 		}
-		if m.loading != "" && m.t-m.loadStart > 12 && !m.audioInitializing() {
-			m.loading = "" // give up quietly
-		}
-		if m.audioInitializing() && m.initTimerActive &&
-			m.t-m.initStart > 30 && m.note != audioInitializingWarning {
-			m.note, m.noteAt = audioInitializingWarning, m.t
-		}
-		if m.note != "" && m.t-m.noteAt > 6 &&
-			!(m.audioInitializing() && m.note == audioInitializingWarning) {
-			m.note = ""
-		}
-		if m.vizService != nil {
-			service := m.vizService
-			if service.Err() != nil {
-				m.failVisualizer()
-				visualizerClose = closeVisualizerCmd(service)
-			} else if frame, ok := service.Latest(); ok {
-				if visualizerFrameStale(now, frame.At) {
-					m.vizTargets = [32]float64{}
-				} else {
-					m.vizTargets = frame.Bands
-					m.vizLive = frame.Live
-					m.vizSource = frame.Source
-					m.vizOpening = false
-				}
+		m.lastFrame = now
+		var cmds []tea.Cmd
+		for range frames {
+			if c := m.stepFrame(now); c != nil {
+				cmds = append(cmds, c)
 			}
 		}
-		if m.vizLive {
-			for i := range m.vizBands {
-				m.vizBands[i] += (m.vizTargets[i] - m.vizBands[i]) * 0.45
-			}
-		} else if !m.vizOpening {
-			m.vizBands = simulatedBands(m.t, m.st.Playing)
-		} else {
-			m.vizBands = [32]float64{}
-		}
-		decayPeaks(&m.vizPeaks, m.vizBands)
-		m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
-		m.orbSpin, m.orbWobble = orbAdvance(m.orbSpin, m.orbWobble, m.orbKick)
-		if m.st.Dur > 0 && m.st.Playing {
-			m.wv.record(float64(m.st.Pos)/float64(m.st.Dur), bandsLevel(m.vizBands))
-		}
-		scrobble := m.advanceScrobble(time.Second / 30)
-		cmds := []tea.Cmd{tick()}
-		if visualizerClose != nil {
-			cmds = append(cmds, visualizerClose)
-		}
-		if scrobble != nil {
-			cmds = append(cmds, scrobble)
-		}
+		cmds = append(cmds, tick(m.frameInterval()))
 		return m, tea.Batch(cmds...)
 	case statusMsg:
 		m.status = string(msg)
