@@ -142,6 +142,7 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 		m.vizBands = [32]float64{}
 	}
 	decayPeaks(&m.vizPeaks, m.vizBands)
+	m.vizReact.update(m.vizBands)
 	m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
 	m.orbSpin, m.orbWobble = orbAdvance(m.orbSpin, m.orbWobble, m.orbKick)
 	if m.st.Dur > 0 && m.st.Playing {
@@ -169,6 +170,7 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
+	vizReact reactive // per-band contrast signal for the animated visualizers (react.go)
 	colors      colorEditor // the hidden colour controller (? then c)
 	lyCollapsed bool        // no lyrics for this track: the visualizer takes the lyrics rows
 	// browser sleep (see sleep.go)
@@ -1294,9 +1296,9 @@ func simulatedBands(t float64, playing bool) [32]float64 {
 func (m model) vizPanel(w, h int) string {
 	switch m.vizMode {
 	case vizTorus:
-		return orbPanel(w, h-1, m.orbSpin, m.orbWobble, m.vizBands)
+		return orbPanel(w, h-1, m.orbSpin, m.orbWobble, m.shapeBands())
 	case vizSphere:
-		return spherePanel(w, h-1, m.orbSpin, m.orbWobble, m.orbKick, m.vizBands)
+		return spherePanel(w, h-1, m.orbSpin, m.orbWobble, m.orbKick, m.shapeBands())
 	}
 	rows, bars := h-1, max(1, w/3)
 	heights := liveBarHeights(m.vizBands, bars, rows)
