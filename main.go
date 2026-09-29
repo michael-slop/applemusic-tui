@@ -169,6 +169,7 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
+	lyCollapsed bool // no lyrics for this track: the visualizer takes the lyrics rows
 	// browser sleep (see sleep.go)
 	engRef        *atomic.Pointer[engine.Engine] // what MPRIS controls act on
 	mprisWake     chan wakeIntent
@@ -740,6 +741,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lyricsMsg:
 		if msg.id == m.lyFor {
 			m.ly, m.lyBusy = msg.ly, false
+			// Decided only when a lookup finishes, never while one is in flight:
+			// switching tracks keeps the previous shape until the answer is in,
+			// so the column does not flick open and shut on every track change.
+			m.lyCollapsed = len(msg.ly.Lines) == 0 &&
+				configBool(m.cfg, "lyrics.collapse_when_missing", true)
 		}
 	case artMsg:
 		if msg.id == m.artFor && msg.img != nil {
@@ -1591,8 +1597,11 @@ func (m model) View() string {
 	}
 	viz := panel(m.visualizerTitle(), m.vizPanel(lay.vw, lay.vh-2), lay.vw, lay.vh-2,
 		false, m.pulsedAccent())
-	lyr := panel("LYRICS", m.lyricsPanel(lay.vw, lay.lh), lay.vw, lay.lh, false, m.pulsedAccent())
-	right := joinVerticalLeft(viz, lyr)
+	right := viz
+	if lay.lh > 0 {
+		lyr := panel("LYRICS", m.lyricsPanel(lay.vw, lay.lh), lay.vw, lay.lh, false, m.pulsedAccent())
+		right = joinVerticalLeft(viz, lyr)
+	}
 	top := joinHorizontalTop(left, right)
 
 	tw := m.w - 2

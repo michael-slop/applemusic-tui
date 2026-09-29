@@ -36,6 +36,9 @@ func (m model) layout() layout {
 	l.vh = l.topH * 62 / 100
 	l.vw = l.rightW - 2
 	l.lh = l.topH - l.vh - 2
+	if m.lyCollapsed {
+		l.vh, l.lh = l.topH, 0 // the visualizer takes the whole right column
+	}
 	return l
 }
 

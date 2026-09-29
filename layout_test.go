@@ -84,3 +84,23 @@ func TestLayoutFits(t *testing.T) {
 		}
 	}
 }
+
+// Collapsing the lyrics panel must hand its rows to the visualizer, not lose
+// them: the frame stays exactly as tall and as wide as with lyrics showing.
+func TestCollapsedLyricsKeepsTheFrameSize(t *testing.T) {
+	for _, s := range [][2]int{{120, 35}, {80, 24}, {200, 50}, {71, 23}} {
+		base := model{w: s[0], h: s[1], phase: phaseReady, st: demoState(), t: 1.7, recent: demoRecent(7)}
+		open := base.View()
+		base.lyCollapsed = true
+		shut := base.View()
+		if got, want := len(strings.Split(shut, "\n")), len(strings.Split(open, "\n")); got != want {
+			t.Errorf("%dx%d: collapsed view has %d rows, lyrics view %d", s[0], s[1], got, want)
+		}
+		if strings.Contains(shut, "LYRICS") {
+			t.Errorf("%dx%d: collapsed view still draws the lyrics panel", s[0], s[1])
+		}
+		if lay := base.layout(); lay.lh != 0 || lay.vh != lay.topH {
+			t.Errorf("%dx%d: collapsed layout vh=%d lh=%d topH=%d", s[0], s[1], lay.vh, lay.lh, lay.topH)
+		}
+	}
+}
