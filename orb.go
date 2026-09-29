@@ -346,7 +346,7 @@ func loadVizMode() int {
 	if name == "orb" {
 		name = "torus" // the torus shipped alone, under the generic name
 	}
-	for mode, known := range vizModeNames {
+	for mode, known := range vizModeList() {
 		if known == name {
 			return mode
 		}
@@ -355,6 +355,7 @@ func loadVizMode() int {
 }
 
 // saveVizMode is best-effort: a read-only config dir must not break the UI.
+// The mode is saved by NAME, so adding effects never shifts a saved choice.
 func saveVizMode(mode int) {
 	p := vizModeFile()
 	if p == "" {
@@ -367,8 +368,9 @@ func saveVizMode(mode int) {
 }
 
 func vizModeName(mode int) string {
-	if mode < 0 || mode >= vizModes {
+	list := vizModeList()
+	if mode < 0 || mode >= len(list) {
 		return vizModeNames[vizBars]
 	}
-	return vizModeNames[mode]
+	return list[mode]
 }

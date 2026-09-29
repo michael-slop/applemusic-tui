@@ -149,6 +149,7 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 	if m.st.Dur > 0 && m.st.Playing {
 		m.wv.record(float64(m.st.Pos)/float64(m.st.Dur), bandsLevel(m.vizBands))
 	}
+	m.stepFx()
 	scrobble := m.advanceScrobble(time.Second / 30)
 	return tea.Batch(visualizerClose, scrobble)
 }
@@ -171,6 +172,7 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
+	fx          *fxHost     // the running panefx animation, when the mode is one (fxhost.go)
 	reactivity  float64     // 0..1: how hard animated visualizers answer the music ([ and ])
 	vizReact    reactive    // per-band contrast signal for the animated visualizers (react.go)
 	colors      colorEditor // the hidden colour controller (? then c)
@@ -280,6 +282,9 @@ type model struct {
 func (m model) visualizerTitle() string {
 	if m.vizLive {
 		t := "VISUALIZER · LIVE · " + m.vizSource
+		if name := m.fxName(); name != "" {
+			t += " · " + strings.ToUpper(name)
+		}
 		if m.vizMode != vizBars { // the bars are an EQ; the slider drives the animations
 			t += " · REACT " + strconv.Itoa(int(math.Round(m.reactivity*100))) + "%"
 		}
@@ -919,7 +924,12 @@ func (m model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.acctOpen, m.acctLoading = true, true
 		return m, accountCmd(eng)
 	case "v":
-		m.vizMode = (m.vizMode + 1) % vizModes
+		m.vizMode = (m.vizMode + 1) % len(vizModeList())
+		saveVizMode(m.vizMode)
+		m.note, m.noteAt = "visualizer · "+vizModeName(m.vizMode), m.t
+	case "V":
+		n := len(vizModeList())
+		m.vizMode = (m.vizMode + n - 1) % n
 		saveVizMode(m.vizMode)
 		m.note, m.noteAt = "visualizer · "+vizModeName(m.vizMode), m.t
 	case "[", "]":
@@ -1308,6 +1318,9 @@ func simulatedBands(t float64, playing bool) [32]float64 {
 }
 
 func (m model) vizPanel(w, h int) string {
+	if m.fxName() != "" {
+		return m.fxPanel(w, h-1)
+	}
 	switch m.vizMode {
 	case vizTorus:
 		return orbPanel(w, h-1, m.orbSpin, m.orbWobble, m.shapeBands())
