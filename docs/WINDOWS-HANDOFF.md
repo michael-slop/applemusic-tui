@@ -4,6 +4,17 @@ Written 2026-09-29 by the Claude session on SnatchedLenix7 (the Linux laptop).
 Repo: https://github.com/michael-slop/applemusic-tui (branch `main`, same as
 `power-tuning`). Upstream: https://github.com/k1y0miiii/applemusic-tui.
 
+> **⚠ Never start Chrome from an SSH session on this box.** Each Chrome launch
+> in a key-authenticated SSH session makes one failed interactive logon for
+> `micha` (Security event 4625, status 0xc000006d/0xc000006a). Windows' lockout
+> policy here is 10 failures in 10 minutes → `micha` is locked for 10 minutes,
+> which also blocks every SSH login (OpenSSH/Admin: "get_user_token - unable to
+> generate token", "ga_init, unable to resolve user micha"). This happened on
+> 2026-09-29 14:07:51 when the engine tests (which launch Chrome ~10 times) were
+> run over SSH, and was reproduced with a single headless launch. Run amtui and
+> `go test ./engine/` only from an interactive desktop session (e.g. Windows
+> Terminal on the machine).
+
 ## What amtui is
 
 A Go terminal UI for Apple Music. It drives the official web player
