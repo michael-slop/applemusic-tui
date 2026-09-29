@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -112,7 +113,8 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 		m.note, m.noteAt = audioInitializingWarning, m.t
 	}
 	if m.note != "" && m.t-m.noteAt > 6 &&
-		!(m.audioInitializing() && m.note == audioInitializingWarning) {
+		!(m.audioInitializing() && m.note == audioInitializingWarning) &&
+		!(m.asleep && (m.note == asleepNote || m.waking)) {
 		m.note = ""
 	}
 	if m.vizService != nil {
@@ -168,17 +170,28 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
-	lastFrame time.Time // when the previous tick ran; paces idle catch-up
-	w, h      int
-	t         float64 // seconds since start, drives animation
-	phase     phase
-	status    string
-	note      string
-	noteAt    float64 // m.t when the note was set; expires after 6s
-	eng       *engine.Engine
-	st        engine.State
-	focus     int // 0 queue, 1 recent, 2 player
-	selIdx    int
+	// browser sleep (see sleep.go)
+	engRef        *atomic.Pointer[engine.Engine] // what MPRIS controls act on
+	mprisWake     chan wakeIntent
+	sleepAfter    time.Duration
+	pausedSince   time.Time
+	asleep        bool
+	sleepInFlight bool
+	wakeQueued    bool
+	waking        bool
+	snap          *engine.Snapshot
+	wakeIntent    *wakeIntent
+	lastFrame     time.Time // when the previous tick ran; paces idle catch-up
+	w, h          int
+	t             float64 // seconds since start, drives animation
+	phase         phase
+	status        string
+	note          string
+	noteAt        float64 // m.t when the note was set; expires after 6s
+	eng           *engine.Engine
+	st            engine.State
+	focus         int // 0 queue, 1 recent, 2 player
+	selIdx        int
 
 	// recently played, shown as a cover grid under the queue
 	recent    []engine.Track
@@ -344,7 +357,8 @@ const badPollsToReconnect = 5
 func (m model) reconnect(status string) (tea.Model, tea.Cmd) {
 	eng := m.eng
 	m.mpris.Close()
-	m.mpris, m.eng = nil, nil
+	m.mpris = nil
+	m.setEngine(nil)
 	m.badPolls = 0
 	m.st = engine.State{}
 	m.phase, m.status = phaseBoot, status
@@ -553,7 +567,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 		return m, listenStatus(m.statusCh)
 	case readyMsg:
-		m.phase, m.eng = phaseReady, msg.eng
+		m.phase = phaseReady
+		m.setEngine(msg.eng)
 		cmds := []tea.Cmd{
 			m.fetchState(true),
 			listenEngine(m.eng),
@@ -568,14 +583,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A machine with no session bus — a TTY, a container, macOS — simply
 		// has no MPRIS, which is not an error worth showing. MPRIS is re-published
 		// after a reconnect because its controls hold the old engine.
-		if srv, err := mpris.Publish(mprisControls{eng: m.eng, quit: m.mprisQuit}); err == nil {
-			m.mpris = srv
-			if !m.mprisListening {
-				m.mprisListening = true
-				cmds = append(cmds, listenMPRISQuit(m.mprisQuit))
+		// After a browser sleep the MPRIS server is still up and already
+		// follows engRef; only a first start or a reconnect publishes.
+		if m.mpris == nil {
+			if srv, err := mpris.Publish(mprisControls{ref: m.engRef, quit: m.mprisQuit, wake: m.mprisWake}); err == nil {
+				m.mpris = srv
+				if !m.mprisListening {
+					m.mprisListening = true
+					cmds = append(cmds, listenMPRISQuit(m.mprisQuit), listenWake(m.mprisWake))
+				}
 			}
 		}
+		if m.asleep {
+			cmds = append(cmds, m.restoreAfterWake(msg.eng))
+		}
 		return m, tea.Batch(cmds...)
+	case sleptMsg:
+		m.sleepInFlight = false
+		if msg.err == nil {
+			m.snap = &msg.snap
+		}
+		if m.wakeQueued {
+			m.wakeQueued, m.waking = false, true
+			return m, connectCmd(m.statusCh)
+		}
+		return m, nil
+	case wakeMsg:
+		cmd := listenWake(m.mprisWake)
+		if !m.asleep {
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, m.wake(msg.intent))
 	case mprisQuitMsg:
 		m.closeVisualizerAsync()
 		m.mpris.Close()
@@ -688,6 +726,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if tmpl := m.st.Now.Art; tmpl != "" {
 					cmd = tea.Batch(cmd, fetchArtworkCmd(id, tmpl))
 				}
+			}
+		}
+		if msg.err == nil {
+			if sleep := m.maybeSleep(); sleep != nil {
+				return m, tea.Batch(cmd, sleep) // the poll loop stops with the browser
 			}
 		}
 		if !msg.polled {
@@ -807,6 +850,16 @@ func (m model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, nil
+	}
+	if m.asleep {
+		if s := msg.String(); s == "q" || s == "ctrl+c" {
+			m.closeVisualizerAsync()
+			m.mpris.Close()
+			return m, tea.Quit
+		}
+		if cmd, handled := m.asleepKey(msg.String()); handled {
+			return m, cmd
+		}
 	}
 	if m.audioInitializing() {
 		switch msg.String() {
@@ -1570,8 +1623,11 @@ func main() {
 		statusCh:  make(chan string, 8),
 		status:    "starting…",
 		mprisQuit: make(chan struct{}, 1),
+		mprisWake: make(chan wakeIntent, 1),
+		engRef:    new(atomic.Pointer[engine.Engine]),
 	}
 	m.cfg = loadConfig()
+	m.sleepAfter = sleepAfterFromConfig(m.cfg)
 	m.vizMode = loadVizMode()
 	m.scrobbler = newScrobbler(m.cfg)
 	m.artCache = newArtCache(8)

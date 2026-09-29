@@ -49,4 +49,5 @@ def main():
         print(asyncio.run(ev(sys.argv[2]))); return
     print(asyncio.run(ev(CMDS[cmd])))
 
-main()
+if __name__ == "__main__":
+    main()

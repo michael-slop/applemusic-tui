@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,15 +15,56 @@ import (
 // channel rather than calling os.Exit, so the desktop asking us to quit still
 // runs the same shutdown as pressing q — the browser has to be closed.
 type mprisControls struct {
-	eng  *engine.Engine
+	ref  *atomic.Pointer[engine.Engine] // nil engine = browser asleep
 	quit chan struct{}
+	wake chan wakeIntent
 }
 
-func (c mprisControls) PlayPause() error             { return c.eng.PlayPause() }
-func (c mprisControls) Next() error                  { return c.eng.Next() }
-func (c mprisControls) Prev() error                  { return c.eng.Prev() }
-func (c mprisControls) SeekTo(d time.Duration) error { return c.eng.SeekTo(d) }
-func (c mprisControls) SetVolume(v int) error        { return c.eng.SetVolume(v) }
+var errAsleep = errors.New("browser asleep")
+
+// eng returns the live engine, or asks the UI to wake the browser (running
+// intent once it is back) and returns nil.
+func (c mprisControls) eng(intent wakeIntent) *engine.Engine {
+	if e := c.ref.Load(); e != nil {
+		return e
+	}
+	select {
+	case c.wake <- intent:
+	default: // a wake is already pending
+	}
+	return nil
+}
+
+func (c mprisControls) PlayPause() error {
+	if e := c.eng(wakeIntent{play: true, jump: -1}); e != nil {
+		return e.PlayPause()
+	}
+	return nil
+}
+func (c mprisControls) Next() error {
+	if e := c.eng(wakeIntent{play: true, jump: -1}); e != nil {
+		return e.Next()
+	}
+	return nil
+}
+func (c mprisControls) Prev() error {
+	if e := c.eng(wakeIntent{play: true, jump: -1}); e != nil {
+		return e.Prev()
+	}
+	return nil
+}
+func (c mprisControls) SeekTo(d time.Duration) error {
+	if e := c.ref.Load(); e != nil {
+		return e.SeekTo(d)
+	}
+	return errAsleep
+}
+func (c mprisControls) SetVolume(v int) error {
+	if e := c.ref.Load(); e != nil {
+		return e.SetVolume(v)
+	}
+	return errAsleep
+}
 
 func (c mprisControls) Quit() {
 	select {
