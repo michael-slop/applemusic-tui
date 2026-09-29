@@ -2,7 +2,7 @@ package fx
 
 // Rotating 3D solids with a z-buffer, ported from panefx's spin3d.rs. panefx's
 // module also drew the donut and the sphere; amtui already has its own torus
-// and sphere visualizers, so only the cube and the galaxy are ported here.
+// and sphere visualizers, so only the cube is ported here (the galaxy was dropped 2026-09-29).
 //
 // The method is Andy Sloane's donut.c (2006), which panefx reimplemented:
 //
@@ -17,7 +17,7 @@ package fx
 // A z-buffer is what makes it a solid rather than a wireframe: the far side
 // is computed, then rejected because the near side already claimed the cells.
 // The shape only swaps the parametric surface; the machinery (rotate,
-// project, depth-test, shade) is shared, which is why cube and galaxy share a
+// project, depth-test, shade) is shared, which is why the shapes share a
 // module. Everything is rasterized in Step, so Cell is a table lookup.
 //
 // Cell aspect: x is projected at twice the scale of y, and the fit is to
@@ -43,8 +43,6 @@ type spinShape int
 
 const (
 	spinCube spinShape = iota
-	// spinGalaxy is a spiral arm cloud: a disc rather than a solid.
-	spinGalaxy
 )
 
 type spinSample struct{ p, n [3]float64 }
@@ -83,7 +81,6 @@ func newSpin3d(name string, shape spinShape) func() Effect {
 
 func init() {
 	Register("cube", 40, newSpin3d("cube", spinCube))
-	Register("galaxy", 41, newSpin3d("galaxy", spinGalaxy))
 }
 
 func (s *spin3d) Name() string { return s.name }
@@ -124,23 +121,6 @@ func (s *spin3d) steps() int {
 func (s *spin3d) pointAt(u, v float64) (p, n [3]float64) {
 	const tau = 2 * math.Pi
 	switch s.shape {
-	case spinGalaxy:
-		// A logarithmic spiral disc: radius grows with the arm angle, and u
-		// picks which arm plus a little thickness.
-		const arms = 2.0
-		r := 0.35 + v/tau*2.6
-		ang := v*1.6 + math.Floor(u*arms)*(tau/arms)
-		sa, ca := math.Sincos(ang)
-		// Thickness: a thin disc, not a plane, so it catches light.
-		z := math.Sin(u*7) * 0.18
-		// The normal LEANS OUTWARD along the arm rather than pointing flatly
-		// at +z. A flat disc normal is nearly perpendicular to the light for
-		// every point, so the whole galaxy rendered at the bottom of the ramp
-		// (measured in panefx: a barely-visible outline). Leaning it gives the
-		// arms a bright and a dark side, which also makes the spin readable.
-		nx, ny, nz := ca*0.55, sa*0.55, 0.62
-		m := math.Sqrt(nx*nx + ny*ny + nz*nz)
-		return [3]float64{r * ca, r * sa, z}, [3]float64{nx / m, ny / m, nz / m}
 	default:
 		// Six faces, chosen by where v falls; u walks one axis and v's
 		// fraction the other. A cube has no smooth parameterisation, so this

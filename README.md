@@ -49,8 +49,7 @@ What changed:
   installer, and Windows-safe tests.
 - **The panefx animations.** ASCII effects ported from
   [panefx](https://github.com/michael-slop) — flames, fire, waves, plasma,
-  tunnel, starfield, cube, galaxy, skullspin, warlockspin, wizardtorch,
-  tgevil, wzfire, raalien — as visualizer modes
+  tunnel, starfield, cube — as visualizer modes
   (`v` / `V` cycle; `go run ./bench/fxdemo <name> 80 24 10` runs one alone
   against live audio). Each keeps its panefx look at reactivity 0 and
   answers the music above it; colours follow the theme.

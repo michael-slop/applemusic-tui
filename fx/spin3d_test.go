@@ -16,7 +16,7 @@ func builtSpin(name string, cols, rows int) *spin3d {
 func TestSpin3dEveryShapeDrawsSomething(t *testing.T) {
 	// A shape whose parameterisation is wrong renders as an empty screen,
 	// which looks exactly like a broken effect.
-	for _, name := range []string{"cube", "galaxy"} {
+	for _, name := range []string{"cube"} {
 		s := builtSpin(name, 80, 40)
 		s.Step(silence())
 		if n := ptsLit(s, 80, 40); n <= 50 {
@@ -79,7 +79,7 @@ func TestSpin3dStaysOnScreenAtAnyPanelShape(t *testing.T) {
 }
 
 func TestSpin3dKickAddsRotation(t *testing.T) {
-	calm, hit := builtSpin("galaxy", 40, 20), builtSpin("galaxy", 40, 20)
+	calm, hit := builtSpin("cube", 40, 20), builtSpin("cube", 40, 20)
 	a := silence()
 	a.Playing = true
 	calm.Step(a)
