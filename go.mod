@@ -8,9 +8,11 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
+	github.com/go-ole/go-ole v1.3.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/jfreymuth/pulse v0.1.2
 	github.com/lucasb-eyer/go-colorful v1.2.0
+	github.com/moutend/go-wca v0.3.0
 	github.com/muesli/termenv v0.16.0
 	gonum.org/v1/gonum v0.17.0
 )

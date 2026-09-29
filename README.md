@@ -14,6 +14,40 @@ the audio legally, amtui just gives it a terminal face.
 
 <p align="center"><img src="docs/media/demo.gif" alt="amtui — Apple Music in the terminal" width="800"></p>
 
+## About this fork
+
+This is a fork of [k1y0miiii/applemusic-tui](https://github.com/k1y0miiii/applemusic-tui)
+focused on making amtui lighter on the machine it runs on, plus a real Windows
+port. Measured on a Linux laptop (160×45 terminal, 60 s samples, % of one CPU
+core; `bench/bench.sh` reproduces it):
+
+| | amtui playing | amtui paused | Chrome playing | Chrome paused |
+| --- | --- | --- | --- | --- |
+| upstream | 35.1% | 35.8% | 4.4% | 0.6% |
+| this fork | 10.7% | 3.0% | 3.6% | 0.2% → **0 after 10 min** |
+
+What changed:
+
+- **Cached artwork rendering.** Covers were re-rendered cell by cell on every
+  frame (the single biggest CPU cost); they are now rendered once per size.
+- **Idle frame pacing.** 30 fps only while music plays or something loads,
+  5 fps otherwise; animations still advance in real time.
+- **Faster panels.** Borders and joins measure each line once through a width
+  cache; output is byte-identical to lipgloss (tested).
+- **Events instead of hard polling.** MusicKit change events are pushed to
+  amtui, so the UI reacts in milliseconds; the poll relaxes to 2 s playing /
+  5 s paused and the 200-item queue is only re-sent when it changes.
+- **Direct queue jumps.** Picking a song 40 places down calls
+  `changeToMediaAtIndex` once instead of skipping through every track in
+  between (19.5 s → 0.85 s measured).
+- **Browser sleep.** After 10 minutes paused the hidden Chrome (~800 MB) is
+  closed; any key or media key that needs the player brings it back with the
+  same queue, track and position (~5–7 s).
+- **Login fix.** The login browser is closed gracefully, so a fresh sign-in is
+  actually saved instead of being lost on the restart.
+- **Windows.** Real visualizer via WASAPI loopback capture, a PowerShell
+  installer, and Windows-safe tests.
+
 ## Why amtui
 
 Terminal Apple Music clients are usually AppleScript remotes for the macOS
@@ -96,12 +130,27 @@ through the system mixer (the web player serves AAC 256; no lossless).
 > special workspace (Wayland forbids offscreen positioning); other Wayland
 > compositors may leave the window visible for now.
 
-> Windows binaries are **untested and incomplete**: they build and the player
-> works, but there is no system-audio capture backend on Windows, so the
-> visualizer always runs in its labeled simulated mode. Use Windows Terminal —
-> the legacy console does not render the TUI correctly. Reports welcome.
+> Windows: the visualizer captures system audio through WASAPI loopback
+> (verified on Windows 11), and the test suite passes there, including the
+> Chrome-driven engine tests. Install with `install.ps1` (below) and use
+> Windows Terminal — the legacy console does not render the TUI correctly.
+> Media keys work through Chrome's own Windows media integration while the
+> browser is awake; a media key does not wake a sleeping browser on Windows
+> (press space in amtui). The hidden browser window may show in the taskbar.
 
 ## Install
+
+### Windows
+
+```powershell
+git clone https://github.com/michaelslop/applemusic-tui
+cd applemusic-tui
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+`install.ps1` builds with Go when it is installed, otherwise it downloads the
+latest Windows release. It installs to `%LOCALAPPDATA%\Programs\amtui` and adds
+that to your user PATH. You also need Chrome: `winget install Google.Chrome`.
 
 ### Prebuilt binaries
 
@@ -282,6 +331,15 @@ pulse, the waveform progress bar and the album art on or off.
 | `AMTUI_CHROME` | Path to the Chrome/Chromium binary (overrides auto-detection) |
 | `AMTUI_CONFIG_DIR` | Config directory (default `~/.config/amtui`) |
 | `AMTUI_DEBUG` | Run the browser visibly, with verbose logging |
+| `AMTUI_SLEEP_AFTER` | Browser sleep delay as a Go duration (`30s`, `5m`); overrides the config |
+| `AMTUI_PPROF` | Serve Go's profiler on this address (e.g. `127.0.0.1:6060`) |
+
+In `config.toml`:
+
+```toml
+[browser]
+sleep_after_minutes = 10   # close the hidden browser after this long paused; 0 = never
+```
 
 ## License
 

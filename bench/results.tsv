@@ -2,3 +2,4 @@
 13:33	art-cache+idle-pacing	play_amtui=25.1%	play_chrome=4.5%	pause_amtui=7.8%	pause_chrome=0.6%	amtui_rss=45MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
 13:38	+fast-panels	play_amtui=11.1%	play_chrome=4.5%	pause_amtui=4.2%	pause_chrome=0.5%	amtui_rss=76MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
 13:44	+events+queue-diff	play_amtui=9.5%	play_chrome=4.4%	pause_amtui=2.6%	pause_chrome=0.5%	amtui_rss=68MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
+14:03	final (all changes)	play_amtui=10.7%	play_chrome=3.6%	pause_amtui=3.0%	pause_chrome=0.2%	amtui_rss=54MB	{"st":2,"t":80,"pos":0,"len":23,"vol":0}
