@@ -59,8 +59,9 @@ type (
 	readyMsg  struct{ eng *engine.Engine }
 	failMsg   struct{ err error }
 	stateMsg  struct {
-		st  engine.State
-		err error
+		st     engine.State
+		err    error
+		polled bool // from the poll loop, which re-arms itself; event refreshes don't
 	}
 	searchMsg struct {
 		res       engine.SearchResults
@@ -375,11 +376,44 @@ func listenStatus(ch chan string) tea.Cmd {
 	return func() tea.Msg { return statusMsg(<-ch) }
 }
 
-func (m model) fetchState() tea.Cmd {
+func (m model) fetchState(polled bool) tea.Cmd {
 	eng := m.eng
 	return func() tea.Msg {
 		st, err := eng.State()
-		return stateMsg{st, err}
+		return stateMsg{st: st, err: err, polled: polled}
+	}
+}
+
+// engineEventMsg means MusicKit reported a change in eng's page.
+type engineEventMsg struct{ eng *engine.Engine }
+
+// listenEngine waits for the next MusicKit change signal from eng. It ends
+// quietly when that browser goes away (a reconnect starts a new listener).
+func listenEngine(eng *engine.Engine) tea.Cmd {
+	if eng == nil || eng.Notify() == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case <-eng.Notify():
+			return engineEventMsg{eng}
+		case <-eng.Done():
+			return nil
+		}
+	}
+}
+
+// pollInterval paces the safety-net poll. Changes arrive as MusicKit events,
+// so polling only has to correct the playback clock and watch session health;
+// it stays fast while a track is loading or something looks wrong.
+func (m model) pollInterval() time.Duration {
+	switch {
+	case m.badPolls > 0, m.st.Initializing, m.initPending, m.loading != "", !m.st.Authed:
+		return 500 * time.Millisecond
+	case m.st.Playing:
+		return 2 * time.Second
+	default:
+		return 5 * time.Second
 	}
 }
 
@@ -521,7 +555,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readyMsg:
 		m.phase, m.eng = phaseReady, msg.eng
 		cmds := []tea.Cmd{
-			m.fetchState(),
+			m.fetchState(true),
+			listenEngine(m.eng),
 			m.libraryCmd(), // fills the recently-played grid
 		}
 		// System audio capture outlives the browser, so a reconnect keeps the
@@ -569,7 +604,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.eng == nil {
 			return m, nil // a reconnect is in flight; readyMsg restarts the loop
 		}
-		return m, m.fetchState()
+		return m, m.fetchState(true)
+	case engineEventMsg:
+		if msg.eng != m.eng || m.eng == nil {
+			return m, nil // a stale listener from before a reconnect
+		}
+		return m, tea.Batch(m.fetchState(false), listenEngine(m.eng))
 	case stateMsg:
 		// A dead session shows up two ways: isAuthorized flips false, or — once
 		// the page has navigated away from MusicKit — the poll fails outright.
@@ -650,7 +690,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		poll := tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return pollMsg{} })
+		if !msg.polled {
+			return m, cmd
+		}
+		poll := tea.Tick(m.pollInterval(), func(time.Time) tea.Msg { return pollMsg{} })
 		return m, tea.Batch(poll, cmd)
 	case lyricsMsg:
 		if msg.id == m.lyFor {

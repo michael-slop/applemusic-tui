@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,7 +60,24 @@ type Engine struct {
 	park    bool
 	primed  bool
 	windows windowController
+
+	// notify receives a (coalesced) signal whenever MusicKit reports a change,
+	// so the UI can refresh immediately instead of polling at a high rate.
+	notify chan struct{}
+	// queueSig/lastQueue let State skip re-sending an unchanged queue.
+	queueSig  string
+	lastQueue []Track
 }
+
+// notifyBinding is the page-side function MusicKit event listeners call.
+const notifyBinding = "__amtuiNotify"
+
+// Notify signals MusicKit changes (play/pause, track, queue, volume, auth).
+// Signals coalesce: one pending signal stands for any number of events.
+func (e *Engine) Notify() <-chan struct{} { return e.notify }
+
+// Done is closed when the engine's browser is gone.
+func (e *Engine) Done() <-chan struct{} { return e.ctx.Done() }
 
 func profileDir() (string, error) {
 	home, err := os.UserHomeDir()
@@ -329,12 +347,24 @@ func Connect(status func(string)) (*Engine, error) {
 	var ok bool
 	_ = chromedp.Run(ctx, chromedp.Evaluate(autoplayJS, &ok))
 	status("connected")
-	return &Engine{
+	e := &Engine{
 		ctx:     ctx,
 		cancels: cancels,
 		park:    !visible,
 		windows: newWindowController(browserPID(ctx)),
-	}, nil
+		notify:  make(chan struct{}, 1),
+	}
+	chromedp.ListenTarget(ctx, func(ev any) {
+		if b, ok := ev.(*cdpruntime.EventBindingCalled); ok && b.Name == notifyBinding {
+			select {
+			case e.notify <- struct{}{}:
+			default: // a signal is already pending; it covers this event too
+			}
+		}
+	})
+	// Without the binding the UI simply falls back to its regular poll.
+	_ = chromedp.Run(ctx, cdpruntime.AddBinding(notifyBinding))
+	return e, nil
 }
 
 func (e *Engine) Close() {
@@ -428,8 +458,12 @@ func (e *Engine) State() (State, error) {
 		Now          *jsTrack  `json:"now"`
 		QueuePos     int       `json:"queuePos"`
 		Queue        []jsTrack `json:"queue"`
+		QueueSig     string    `json:"queueSig"`
+		QueueSame    bool      `json:"queueSame"`
 	}
-	if err := e.evalJSONLocked(stateJS, &raw); err != nil {
+	known, _ := json.Marshal(e.queueSig)
+	js := strings.Replace(stateJS, knownQueueDecl, "const known = "+string(known)+";", 1)
+	if err := e.evalJSONLocked(js, &raw); err != nil {
 		return State{}, err
 	}
 	e.updateWindowLifecycleLocked(raw.EngineReady, raw.HiddenStall)
@@ -440,7 +474,7 @@ func (e *Engine) State() (State, error) {
 		Pos:          time.Duration(raw.Pos * float64(time.Second)),
 		Dur:          time.Duration(raw.Dur * float64(time.Second)),
 		Volume:       raw.Volume, Shuffle: raw.Shuffle, Repeat: raw.Repeat,
-		QueuePos: raw.QueuePos, Queue: tracks(raw.Queue), Err: raw.Err,
+		QueuePos: raw.QueuePos, Queue: e.queueFrom(raw.QueueSame, raw.QueueSig, raw.Queue), Err: raw.Err,
 	}
 	if raw.Now != nil {
 		st.Now = raw.Now.track()
@@ -584,4 +618,14 @@ func (e *Engine) Reload() error {
 func jsStr(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// queueFrom returns the queue for this poll: the cached one when the page
+// reported it unchanged, otherwise the freshly sent one (which is cached).
+func (e *Engine) queueFrom(same bool, sig string, raw []jsTrack) []Track {
+	if same && e.lastQueue != nil {
+		return e.lastQueue
+	}
+	e.lastQueue, e.queueSig = tracks(raw), sig
+	return e.lastQueue
 }

@@ -3,8 +3,25 @@ package engine
 // MusicKit JS snippets evaluated in the music.apple.com page context.
 // Action snippets end with `return true` so Evaluate always has a value.
 
+// knownQueueDecl is replaced by Engine.State with the queue signature it
+// already holds; left as-is (tests, first poll) the full queue is sent.
+const knownQueueDecl = `const known = "";`
+
 const stateJS = `(async () => {
   const mk = MusicKit.getInstance();
+  ` + knownQueueDecl + `
+  // Push MusicKit's own change events to amtui (once per page) so it can
+  // refresh on change instead of polling hard.
+  if (!window.__amtuiHooked && typeof window.__amtuiNotify === 'function') {
+    window.__amtuiHooked = true;
+    const ping = () => { try { window.__amtuiNotify(''); } catch (e) {} };
+    for (const ev of ['playbackStateDidChange', 'nowPlayingItemDidChange',
+      'queueItemsDidChange', 'queuePositionDidChange', 'shuffleModeDidChange',
+      'repeatModeDidChange', 'playbackVolumeDidChange',
+      'authorizationStatusDidChange', 'mediaPlaybackError']) {
+      try { mk.addEventListener(ev, ping); } catch (e) {}
+    }
+  }
   const err = window.__amtuiErr || '';
   window.__amtuiErr = '';
   const fmt = (x) => {
@@ -77,7 +94,16 @@ const stateJS = `(async () => {
     repeat: mk.repeatMode || 0,
     now: mk.nowPlayingItem ? fmt(mk.nowPlayingItem) : null,
     queuePos: q ? q.position : -1,
-    queue: q ? q.items.slice(0, 200).map(fmt) : [],
+    // The queue is up to 200 formatted items; send it only when it changed.
+    // The signature covers ids and how many items have resolved metadata.
+    ...(() => {
+      const items = q ? q.items.slice(0, 200) : [];
+      const sig = items.map((x) => String((x && x.id) || '')).join(',') +
+        '@' + (q ? q.items.length : 0) + '#' +
+        items.filter((x) => x && x.attributes && x.attributes.name).length;
+      const same = known !== '' && sig === known;
+      return { queueSig: sig, queueSame: same, queue: same ? [] : items.map(fmt) };
+    })(),
   });
 })()`
 
