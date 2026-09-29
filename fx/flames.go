@@ -71,6 +71,12 @@ type flames struct {
 	b   []int32
 	rng *Rand
 	acc float64
+	// prev is the visible heat before the latest simulation step and disp
+	// what is drawn: heat blended from prev to b by the fraction of the next
+	// 10 Hz tick already elapsed. The gist's simulation is untouched; the
+	// picture changes 30 times a second instead of 10.
+	prev []int32
+	disp []int32
 
 	// The breath: how far the flame height swings either side of the seed
 	// value, and the seconds for one full breath. osc 0 (the default)
@@ -103,6 +109,8 @@ func (f *flames) Resize(cols, rows int) {
 	}
 	f.width, f.height = cols, rows
 	f.b = make([]int32, cols*rows+cols+1)
+	f.prev = make([]int32, cols*rows)
+	f.disp = make([]int32, cols*rows)
 }
 
 func (f *flames) SetPalette(p Palette) {
@@ -135,9 +143,26 @@ func (f *flames) Step(a Audio) {
 	if a.Playing {
 		kick, bass = min(max(a.Kick, 0), 1), Drive(a.Bass)
 	}
+	n := f.width * f.height
 	for f.acc >= flamesTick {
 		f.acc -= flamesTick
+		if len(f.prev) == n {
+			copy(f.prev, f.b[:n])
+		}
 		f.advance(kick, bass)
+	}
+	f.blend(f.acc / flamesTick)
+}
+
+// blend fills disp with heat t of the way from prev to the current state.
+func (f *flames) blend(t float64) {
+	n := f.width * f.height
+	if len(f.disp) != n || len(f.prev) != n {
+		return
+	}
+	for i := range n {
+		p, c := float64(f.prev[i]), float64(f.b[i])
+		f.disp[i] = int32(math.Round(p + (c-p)*t))
 	}
 }
 
@@ -176,6 +201,7 @@ func (f *flames) advance(kick, bass float64) {
 	for i := 0; i < size; i++ {
 		b[i] = (b[i] + b[i+1] + b[i+w] + b[i+w+1]) / 4
 	}
+	f.blend(1) // until Step blends, show exactly this simulation state
 }
 
 func (f *flames) Cell(col, row int) (rune, RGB, bool) {
@@ -183,6 +209,9 @@ func (f *flames) Cell(col, row int) (rune, RGB, bool) {
 		return 0, RGB{}, false
 	}
 	v := f.b[row*f.width+col]
+	if len(f.disp) == f.width*f.height {
+		v = f.disp[row*f.width+col]
+	}
 	// char[(9 if b[i]>9 else b[i])]
 	idx := min(max(v, 0), 9)
 	if idx == 0 {

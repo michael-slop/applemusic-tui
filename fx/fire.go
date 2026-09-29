@@ -97,7 +97,12 @@ type fire struct {
 	cells  []float32
 	dither []float32 // fireCellDither per visible cell, precomputed
 	idx    []uint8   // dithered ramp index per visible cell, for Cell
-	rng    *Rand
+	// prev is the visible heat before the latest simulation step. The sim
+	// keeps panefx's 10 Hz clock; drawing heat blended from prev to cells by
+	// the fraction of the next tick already elapsed gives 30 distinct images a
+	// second instead of 10, without touching the simulation itself.
+	prev []float32
+	rng  *Rand
 	// Cooling factor per row of rise; higher = shorter flames.
 	decay float32
 	acc   float64
@@ -125,6 +130,7 @@ func (f *fire) Resize(cols, rows int) {
 	f.cols, f.rows = cols, rows
 	f.cells = make([]float32, cols*(rows+1))
 	f.idx = make([]uint8, cols*rows)
+	f.prev = make([]float32, cols*rows)
 	f.dither = make([]float32, cols*rows)
 	for r := range rows {
 		for c := range cols {
@@ -150,15 +156,14 @@ func (f *fire) Step(a Audio) {
 	if a.Playing {
 		kick, bass = min(max(a.Kick, 0), 1), Drive(a.Bass)
 	}
-	stepped := false
 	for f.acc >= fireTick {
 		f.acc -= fireTick
+		if len(f.prev) == f.cols*f.rows {
+			copy(f.prev, f.cells[:f.cols*f.rows])
+		}
 		f.advance(float32(kick), float32(bass))
-		stepped = true
 	}
-	if stepped {
-		f.quantise()
-	}
+	f.quantise(float32(f.acc / fireTick))
 }
 
 // advance is one frame of the original.
@@ -226,10 +231,15 @@ func (f *fire) advance(kick, bass float32) {
 // of '.' that read as horizontal lines through the dying flames. A stable
 // per-cell offset before flooring breaks the tie, so cells either side of a
 // threshold scatter instead of flipping in unison.
-func (f *fire) quantise() {
+func (f *fire) quantise(t float32) {
 	n := float32(len(fireRamp))
+	blend := len(f.prev) == len(f.idx)
 	for i := range f.idx {
-		h := min(max(f.cells[i], 0), 1)
+		h := f.cells[i]
+		if blend {
+			h = f.prev[i] + (h-f.prev[i])*t
+		}
+		h = min(max(h, 0), 1)
 		// Dither by up to one bucket, centred so mean brightness is unchanged.
 		d := (f.dither[i] - 0.5) * fireDither
 		f.idx[i] = uint8(min(int(max(h*n+d, 0)), len(fireRamp)-1))

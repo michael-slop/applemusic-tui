@@ -9,7 +9,7 @@ func runFire(cols, rows, frames int, kick, bass float32) *fire {
 	for range frames {
 		f.advance(kick, bass)
 	}
-	f.quantise()
+	f.quantise(1) // fully at the latest simulation step
 	return f
 }
 

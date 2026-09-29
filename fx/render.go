@@ -31,10 +31,9 @@ func Render(e Effect, cols, rows int, profile termenv.Profile) string {
 		for c := 0; c < cols; c++ {
 			ch, col, ok := e.Cell(c, r)
 			if !ok || ch == 0 || ch == ' ' {
-				if open && !plain {
-					sb.WriteString(reset)
-					open = false
-				}
+				// A space has no foreground to show, so the current colour can
+				// stay set across the gap: switching it off and on again around
+				// every blank cell was a third of the bytes of a sparse frame.
 				sb.WriteByte(' ')
 				continue
 			}
