@@ -309,8 +309,14 @@ func Connect(status func(string)) (*Engine, error) {
 			closeAll(vcancels)
 			return nil, err
 		}
-		status("login detected — restarting browser…")
+		status("login detected — saving session…")
+		// Close the login browser gracefully so Chrome flushes the fresh
+		// cookies/localStorage to disk; a hard kill (closeAll) loses them and
+		// the restarted browser comes up signed out.
+		time.Sleep(2 * time.Second)
+		_ = chromedp.Cancel(vctx)
 		closeAll(vcancels)
+		status("login saved — restarting browser…")
 		ctx, cancels, err = open(dir, visible)
 		if err != nil {
 			return nil, err
