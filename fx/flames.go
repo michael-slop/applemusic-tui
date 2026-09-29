@@ -40,6 +40,9 @@ import "math"
 //     (+35 saturated the fire: two thirds of it at the hottest glyph).
 //   - Drive(Bass) raises the seeding density: a busy bass line lights up to
 //     40% more sources along the bottom row.
+//   - The spectrum shapes it: each column's seed heat follows the band beneath
+//     it (mirrored: bass in the middle, treble at both edges), so the fire is
+//     a burning spectrum, tallest where the music is loudest for this song.
 //   - Paused (Playing false) or reactivity 0: exactly the gist.
 
 // flamesChars is the gist's ten-character ramp, coldest first.
@@ -61,6 +64,15 @@ const (
 	// bass drive multiplies the number of sources.
 	flamesKickLift  = 14
 	flamesBassDense = 0.4
+	// Spectrum shaping: each column's seed heat follows the band beneath it,
+	// mirrored so the bass burns in the middle and the treble at both edges.
+	// The swing is in heat per panel row, so a band at +-0.5 moves its
+	// column's flame about +-30% of the panel height at any size.
+	flamesSpectrumPerRow = 1.9
+	// Resting heat per panel row (reaches ~half the panel), floored so a tiny
+	// panel still shows fire; capped by the gist's 65 from 42 rows up.
+	flamesRestPerRow = 1.55
+	flamesRestMin    = 12
 )
 
 type flames struct {
@@ -77,6 +89,8 @@ type flames struct {
 	// picture changes 30 times a second instead of 10.
 	prev []int32
 	disp []int32
+	// spec is this frame's spectrum deviation per column (0 at rest).
+	spec []float64
 
 	// The breath: how far the flame height swings either side of the seed
 	// value, and the seconds for one full breath. osc 0 (the default)
@@ -111,6 +125,7 @@ func (f *flames) Resize(cols, rows int) {
 	f.b = make([]int32, cols*rows+cols+1)
 	f.prev = make([]int32, cols*rows)
 	f.disp = make([]int32, cols*rows)
+	f.spec = make([]float64, cols)
 }
 
 func (f *flames) SetPalette(p Palette) {
@@ -126,6 +141,19 @@ func (f *flames) SetPalette(p Palette) {
 // not a triangle: the fire should pause at the top and bottom of the breath
 // rather than reverse sharply. Clamped to 1..255 so a large osc flattens
 // against the ends instead of wrapping from tall to nothing in one frame.
+// restSeed is the seed heat for this panel. The gist's 65 makes a fire about
+// 21 rows tall whatever the panel (reach ~= seed/3.1 rows, measured), which is
+// a bottom band on panefx's 84-row terminal but fills amtui's 20-40 row panel
+// with no headroom left for the music. So a short panel rests at about half
+// its height; from 42 rows up it is the gist's 65 exactly.
+func (f *flames) restSeed() int32 {
+	seed := f.seedNow()
+	if cap := int32(math.Round(flamesRestPerRow * float64(f.height))); cap < seed {
+		seed = max(cap, flamesRestMin)
+	}
+	return seed
+}
+
 func (f *flames) seedNow() int32 {
 	if f.osc == 0 || f.oscSecs <= 0 {
 		return flamesSeedValue
@@ -144,6 +172,9 @@ func (f *flames) Step(a Audio) {
 		kick, bass = min(max(a.Kick, 0), 1), Drive(a.Bass)
 	}
 	n := f.width * f.height
+	if len(f.spec) == f.width {
+		a.SpectrumRow(f.spec, true)
+	}
 	for f.acc >= flamesTick {
 		f.acc -= flamesTick
 		if len(f.prev) == n {
@@ -183,13 +214,20 @@ func (f *flames) advance(kick, bass float64) {
 	base := w * (f.height - 1)
 	// One value for the whole row: seeding a single frame at two different
 	// heights would fray the base of the fire rather than raise it.
-	seed := f.seedNow()
+	seed := f.restSeed()
 	if kick > 0 {
 		seed = min(seed+int32(math.Round(flamesKickLift*kick)), 255)
 	}
 	for range seeds {
 		off := min(int(f.rng.Float()*float64(w)), w-1)
-		f.b[base+off] = seed
+		v := seed
+		if len(f.spec) == w && f.spec[off] != 0 {
+			// Heat per row of reach is ~3.1, so this swings the column by
+			// about +-30% of the panel height at a band's extremes.
+			lift := flamesSpectrumPerRow * float64(f.height) * f.spec[off]
+			v = min(max(seed+int32(math.Round(lift)), 0), 255)
+		}
+		f.b[base+off] = v
 	}
 	// Advance the breath AFTER seeding, so frame 0 uses the configured height.
 	f.tick++

@@ -145,7 +145,8 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 	decayPeaks(&m.vizPeaks, m.vizBands)
 	m.vizReact.update(m.vizBands)
 	m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
-	m.orbSpin, m.orbWobble = orbAdvance(m.orbSpin, m.orbWobble, m.shapeKick())
+	m.advanceMotion()
+	m.orbSpin, m.orbWobble = orbAdvanceAt(m.orbSpin, m.orbWobble, m.shapeKick(), m.motionSpeed())
 	if m.st.Dur > 0 && m.st.Playing {
 		m.wv.record(float64(m.st.Pos)/float64(m.st.Dur), bandsLevel(m.vizBands))
 	}
@@ -172,6 +173,8 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
+	motion      float64 // how fast animations move, 0.04..1, follows the music (motion.go)
+	motionReady bool
 	fx          *fxHost     // the running panefx animation, when the mode is one (fxhost.go)
 	reactivity  float64     // 0..1: how hard animated visualizers answer the music ([ and ])
 	vizReact    reactive    // per-band contrast signal for the animated visualizers (react.go)

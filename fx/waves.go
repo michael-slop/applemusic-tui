@@ -43,9 +43,20 @@ package fx
 //     crests breathe harder while the band is busy, but stay put.
 //   - Kick surges the phase: each beat pushes the swell forward (up to 3x
 //     speed for the ~0.3 s the pulse lasts), a slow heave rather than a flash.
+//   - The spectrum shapes it: every band owns a strip of columns (bass at the
+//     left, full detail, not mirrored); its crests brighten and its swirl
+//     deepens while that band is above its norm for this song.
 //   - Paused (Playing false) or reactivity 0: exactly the original.
 
 import "math"
+
+// Spectrum shaping: a band at +0.5 deepens its columns' swirl 2.5x
+// (wavesSpecSwirl) and brightens their crests 1.6x (wavesSpecLift); at -0.5
+// the swirl stills and the crests dim.
+const (
+	wavesSpecSwirl = 1.5
+	wavesSpecLift  = 0.6
+)
 
 // wavesRamp is ordered by apparent ink coverage; short and low-contrast at
 // the dark end, since the reference spends most of its area below
@@ -187,7 +198,10 @@ type waves struct {
 	warpA, warpB []float32
 	// Per-frame scratch, so a frame allocates nothing.
 	warped, lam []float32
-	lum         []float32
+	// spec is this frame's band deviation per column (0 at rest; unmirrored,
+	// bass at the left, so the full 32-band detail shows across the width).
+	spec []float64
+	lum  []float32
 	// What Cell draws, computed in Step: glyph index (0 = blank) and ink step.
 	glyph []uint8
 	ink   []uint8
@@ -217,6 +231,7 @@ func (w *waves) Resize(cols, rows int) {
 	n := cols * rows
 	w.lum = make([]float32, n)
 	w.warped = make([]float32, n)
+	w.spec = make([]float64, cols)
 	w.lam = make([]float32, n)
 	w.glyph = make([]uint8, n)
 	w.ink = make([]uint8, n)
@@ -305,6 +320,9 @@ func (w *waves) Step(a Audio) {
 		mid, kick = Drive(a.Mid), min(max(a.Kick, 0), 1)
 	}
 	w.midS += (mid - w.midS) * min(a.DT*3, 1)
+	if len(w.spec) == w.cols {
+		a.SpectrumRow(w.spec, false)
+	}
 	// The swirl is periodic in t with period 1, so the animation loops
 	// seamlessly on its own.
 	w.t = float32(math.Mod(float64(w.t)+a.DT*wavesRate*(1+wavesKickSpeed*kick), 1))
@@ -327,8 +345,13 @@ func (w *waves) compute(swirl float32) {
 	for y := range h {
 		for x := range wd {
 			i := y*wd + x
-			wx := float32(math.Sin(phase+float64(w.warpA[i])*tau)) * swirl
-			wy := float32(math.Cos(phase+float64(w.warpB[i])*tau)) * swirl
+			sw := swirl
+			if len(w.spec) == wd {
+				// Spectrum shaping: the swirl deepens over busy bands.
+				sw *= float32(max(1+wavesSpecSwirl*2*w.spec[x], 0))
+			}
+			wx := float32(math.Sin(phase+float64(w.warpA[i])*tau)) * sw
+			wy := float32(math.Cos(phase+float64(w.warpB[i])*tau)) * sw
 			sy := float32(y) + wy*ampPx
 			sx := float32(x) + wx*ampPx
 			y0f, x0f := float32(math.Floor(float64(sy))), float32(math.Floor(float64(sx)))
@@ -414,8 +437,17 @@ func (w *waves) compute(swirl float32) {
 	}
 	xScale := wavesLUTLast / (shiftedMax + 1e-6)
 	n := len(wavesRunes)
+	shaped := len(w.spec) == wd
 	for i, l := range lam {
 		v := wavesLUT(&wavesRemapLUT, l*xScale)
+		if shaped {
+			// Spectrum shaping: each column's crests brighten with its band
+			// (and dim below its norm), so the swell rises where the
+			// frequency is busy. 0 at rest: exactly the original levels.
+			if d := w.spec[i%wd]; d != 0 {
+				v = min(max(v*float32(1+wavesSpecLift*2*d), 0), 1)
+			}
+		}
 		w.lum[i] = v
 		// Cells at or below the dark cut are not drawn at all.
 		g := 0

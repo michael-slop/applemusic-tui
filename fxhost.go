@@ -71,7 +71,9 @@ func (m *model) stepFx() {
 	a := fx.Audio{
 		Bands: f.bands, React: f.react, Level: f.level,
 		Bass: f.bass, Mid: f.mid, Treble: f.treble, Kick: f.kick,
-		Playing: f.playing, Reactivity: m.reactivity, DT: 1.0 / 30,
+		Playing: f.playing, Reactivity: m.reactivity,
+		// Time itself runs at the music's pace: nearly still when it is off.
+		DT: 1.0 / 30 * m.motionSpeed(),
 	}
 	if !configBool(m.cfg, "visualizer.reactive", true) {
 		a.Reactivity = 0

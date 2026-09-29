@@ -77,8 +77,14 @@ func bassKick(baseline, kick, bass float64) (float64, float64) {
 // *to* the beat rather than just turning. The wobble tilts the axis, so the
 // view drifts between the hole and the edge.
 func orbAdvance(spin, wobble, bass float64) (float64, float64) {
-	spin += 0.030 + 0.20*bass
-	wobble += 0.012 + 0.05*bass
+	return orbAdvanceAt(spin, wobble, bass, 1)
+}
+
+// orbAdvanceAt is orbAdvance at a speed multiplier (motion.go): 1 is the
+// original pace, 0.04 nearly still.
+func orbAdvanceAt(spin, wobble, bass, speed float64) (float64, float64) {
+	spin += (0.030 + 0.20*bass) * speed
+	wobble += (0.012 + 0.05*bass) * speed
 	return math.Mod(spin, 2*math.Pi), math.Mod(wobble, 2*math.Pi)
 }
 

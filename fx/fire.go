@@ -28,10 +28,17 @@ package fx
 //   - Kick makes the seed row burn hotter: fewer cold gaps in the source row
 //     (the cold fraction drops from 25% to ~10% on a full hit), so each beat
 //     sends up a denser wave of flame.
+//   - The spectrum shapes it: each column cools at a rate set by the band
+//     beneath it (mirrored: bass in the middle, treble at both edges), so the
+//     tongues stand tallest over whatever is loudest for this song.
 //   - Paused (Playing false) or reactivity 0: exactly the original.
 
 // fireRamp is the character ramp from the original, coldest first.
 var fireRamp = [8]rune{' ', '.', ':', '*', 's', 'S', '#', '$'}
+
+// fireSpectrumCool: how much a column's cooling follows its band. A band at
+// +0.5 cools that column 60% less (taller tongues); at -0.5, 60% more.
+const fireSpectrumCool = 0.6
 
 const (
 	fireTick = 0.1 // one simulation frame: panefx's default 10 fps
@@ -102,6 +109,8 @@ type fire struct {
 	// the fraction of the next tick already elapsed gives 30 distinct images a
 	// second instead of 10, without touching the simulation itself.
 	prev []float32
+	// spec is this frame's spectrum deviation per column (0 at rest).
+	spec []float64
 	rng  *Rand
 	// Cooling factor per row of rise; higher = shorter flames.
 	decay float32
@@ -131,6 +140,7 @@ func (f *fire) Resize(cols, rows int) {
 	f.cells = make([]float32, cols*(rows+1))
 	f.idx = make([]uint8, cols*rows)
 	f.prev = make([]float32, cols*rows)
+	f.spec = make([]float64, cols)
 	f.dither = make([]float32, cols*rows)
 	for r := range rows {
 		for c := range cols {
@@ -155,6 +165,9 @@ func (f *fire) Step(a Audio) {
 	var kick, bass float64
 	if a.Playing {
 		kick, bass = min(max(a.Kick, 0), 1), Drive(a.Bass)
+	}
+	if len(f.spec) == f.cols {
+		a.SpectrumRow(f.spec, true)
 	}
 	for f.acc >= fireTick {
 		f.acc -= fireTick
@@ -217,7 +230,13 @@ func (f *fire) advance(kick, bass float32) {
 			// Random per-cell cooling. Uniform decay would let the small
 			// sideways term equalise each row over time; the jitter keeps
 			// neighbouring columns at genuinely different heights.
-			jitter := 1 - decay*(0.2+float32(f.rng.Float())*1.6)
+			d := decay
+			if len(f.spec) == cols {
+				// Spectrum shaping: a column over a band above its norm cools
+				// slower, so its tongues climb higher (mirrored, bass centre).
+				d *= 1 - fireSpectrumCool*float32(f.spec[col])*2
+			}
+			jitter := 1 - d*(0.2+float32(f.rng.Float())*1.6)
 			out[col] = min(max(avg*jitter*fade, 0), 1)
 		}
 	}
