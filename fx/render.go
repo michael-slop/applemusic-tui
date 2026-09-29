@@ -21,6 +21,7 @@ func Render(e Effect, cols, rows int, profile termenv.Profile) string {
 	}
 	var sb strings.Builder
 	sb.Grow(rows * (cols + 16))
+	plain := profile == termenv.Ascii // no colour at all: no resets either
 	for r := 0; r < rows; r++ {
 		if r > 0 {
 			sb.WriteByte('\n')
@@ -30,20 +31,20 @@ func Render(e Effect, cols, rows int, profile termenv.Profile) string {
 		for c := 0; c < cols; c++ {
 			ch, col, ok := e.Cell(c, r)
 			if !ok || ch == 0 || ch == ' ' {
-				if open {
+				if open && !plain {
 					sb.WriteString(reset)
 					open = false
 				}
 				sb.WriteByte(' ')
 				continue
 			}
-			if !open || col != cur {
+			if !plain && (!open || col != cur) {
 				sb.WriteString(fgSeq(col, profile))
 				cur, open = col, true
 			}
 			sb.WriteRune(ch)
 		}
-		if open {
+		if open && !plain {
 			sb.WriteString(reset)
 		}
 	}

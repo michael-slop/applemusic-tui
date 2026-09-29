@@ -155,3 +155,11 @@ func (s *solid) Resize(c, r int)                 { s.cols, s.rows = c, r }
 func (s *solid) SetPalette(Palette)              {}
 func (s *solid) Step(Audio)                      {}
 func (s *solid) Cell(c, r int) (rune, RGB, bool) { return '#', s.c, c < s.cols && r < s.rows }
+
+func TestRenderAsciiProfileEmitsNoEscapes(t *testing.T) {
+	e := &solid{c: RGB{1, 2, 3}}
+	e.Resize(5, 2)
+	if out := Render(e, 5, 2, termenv.Ascii); strings.Contains(out, "\x1b") {
+		t.Fatalf("an ASCII terminal should get no escape codes: %q", out)
+	}
+}
