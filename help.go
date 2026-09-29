@@ -72,7 +72,7 @@ var helpSections = []helpSection{
 		{"esc", "close"},
 	}},
 	{"LOOK", []helpEntry{
-		{"v", "bars/torus/sphere"},
+		{"v [ ]", "viz · reactivity"},
 		{"t", "cycle theme"},
 	}},
 	{"OTHER", []helpEntry{

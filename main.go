@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -144,7 +145,7 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 	decayPeaks(&m.vizPeaks, m.vizBands)
 	m.vizReact.update(m.vizBands)
 	m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
-	m.orbSpin, m.orbWobble = orbAdvance(m.orbSpin, m.orbWobble, m.orbKick)
+	m.orbSpin, m.orbWobble = orbAdvance(m.orbSpin, m.orbWobble, m.shapeKick())
 	if m.st.Dur > 0 && m.st.Playing {
 		m.wv.record(float64(m.st.Pos)/float64(m.st.Dur), bandsLevel(m.vizBands))
 	}
@@ -170,7 +171,8 @@ func (m model) frameInterval() time.Duration {
 }
 
 type model struct {
-	vizReact reactive // per-band contrast signal for the animated visualizers (react.go)
+	reactivity  float64     // 0..1: how hard animated visualizers answer the music ([ and ])
+	vizReact    reactive    // per-band contrast signal for the animated visualizers (react.go)
 	colors      colorEditor // the hidden colour controller (? then c)
 	lyCollapsed bool        // no lyrics for this track: the visualizer takes the lyrics rows
 	// browser sleep (see sleep.go)
@@ -277,7 +279,11 @@ type model struct {
 
 func (m model) visualizerTitle() string {
 	if m.vizLive {
-		return "VISUALIZER · LIVE · " + m.vizSource
+		t := "VISUALIZER · LIVE · " + m.vizSource
+		if m.vizMode != vizBars { // the bars are an EQ; the slider drives the animations
+			t += " · REACT " + strconv.Itoa(int(math.Round(m.reactivity*100))) + "%"
+		}
+		return t
 	}
 	if m.vizOpening {
 		return "VISUALIZER · STARTING"
@@ -916,6 +922,14 @@ func (m model) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.vizMode = (m.vizMode + 1) % vizModes
 		saveVizMode(m.vizMode)
 		m.note, m.noteAt = "visualizer · "+vizModeName(m.vizMode), m.t
+	case "[", "]":
+		d := -0.1
+		if msg.String() == "]" {
+			d = 0.1
+		}
+		m.reactivity = math.Round(min(max(m.reactivity+d, 0), 1)*10) / 10
+		saveReactivity(m.reactivity)
+		m.note, m.noteAt = "reactivity "+reactivitySlider(m.reactivity), m.t
 	case "t":
 		next := nextTheme(m.themeName)
 		m.themeName = next.name
@@ -1298,7 +1312,7 @@ func (m model) vizPanel(w, h int) string {
 	case vizTorus:
 		return orbPanel(w, h-1, m.orbSpin, m.orbWobble, m.shapeBands())
 	case vizSphere:
-		return spherePanel(w, h-1, m.orbSpin, m.orbWobble, m.orbKick, m.shapeBands())
+		return spherePanel(w, h-1, m.orbSpin, m.orbWobble, m.shapeKick(), m.shapeBands())
 	}
 	rows, bars := h-1, max(1, w/3)
 	heights := liveBarHeights(m.vizBands, bars, rows)
@@ -1649,6 +1663,7 @@ func main() {
 	m.cfg = loadConfig()
 	m.sleepAfter = sleepAfterFromConfig(m.cfg)
 	m.vizMode = loadVizMode()
+	m.reactivity = loadReactivity(m.cfg)
 	m.scrobbler = newScrobbler(m.cfg)
 	m.artCache = newArtCache(8)
 	loadCustomTheme()

@@ -48,3 +48,41 @@ func TestReactiveFallsQuietInSilence(t *testing.T) {
 		t.Fatalf("silence should settle near 0, got %.2f", out[0])
 	}
 }
+
+func TestReactivitySliderScalesTheSwing(t *testing.T) {
+	m := model{}
+	m.vizReact.out = fill(0.9) // a band well above its running mean
+	m.orbKick = 0.4
+	m.reactivity = 0
+	if b := m.shapeBands(); b[0] != 0.5 || m.shapeKick() != 0 {
+		t.Fatalf("reactivity 0 should flatten to rest: band %.2f kick %.2f", b[0], m.shapeKick())
+	}
+	m.reactivity = 0.5
+	if b := m.shapeBands(); b[0] < 0.899 || b[0] > 0.901 {
+		t.Fatalf("reactivity 0.5 should be the unscaled signal, got %.2f", b[0])
+	}
+	m.reactivity = 1
+	if b := m.shapeBands(); b[0] != 1 || m.shapeKick() < 0.79 {
+		t.Fatalf("reactivity 1 should double the swing: band %.2f kick %.2f", b[0], m.shapeKick())
+	}
+}
+
+func TestReactivityKeysStepPersistAndTitle(t *testing.T) {
+	t.Setenv("AMTUI_CONFIG_DIR", t.TempDir())
+	m := model{w: 120, h: 35, phase: phaseReady, st: demoState(), reactivity: 0.5, vizMode: vizTorus, vizLive: true, vizSource: "PIPEWIRE"}
+	m = press(t, m, "]", "]", "]", "]", "]", "]") // clamps at 100%
+	if m.reactivity != 1 || loadReactivity(nil) != 1 {
+		t.Fatalf("] should step to 100%% and persist, got %.2f / %.2f", m.reactivity, loadReactivity(nil))
+	}
+	m = press(t, m, "[", "[", "[")
+	if m.reactivity != 0.7 {
+		t.Fatalf("[ should step down by 10%%, got %.2f", m.reactivity)
+	}
+	if got := m.visualizerTitle(); got != "VISUALIZER · LIVE · PIPEWIRE · REACT 70%" {
+		t.Fatalf("title = %q", got)
+	}
+	m.vizMode = vizBars
+	if got := m.visualizerTitle(); got != "VISUALIZER · LIVE · PIPEWIRE" {
+		t.Fatalf("the bars are an EQ and should not show the slider, got %q", got)
+	}
+}
