@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"image"
-	"log"
 	"math"
 	"os"
 	"runtime"
@@ -1636,8 +1635,12 @@ func main() {
 	applyTheme(t)
 	// Cell motion rather than all motion: the app only reacts to clicks and the
 	// wheel, and all-motion floods the loop with a message per pointer move.
+	// Anything written to stderr while the TUI owns the screen lands on top of
+	// it; send the standard logger (chromedp included) to a file instead.
+	engine.OpenLog()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
-		log.Fatal(err)
+		fmt.Fprintln(os.Stderr, "amtui:", err)
+		os.Exit(1)
 	}
 }

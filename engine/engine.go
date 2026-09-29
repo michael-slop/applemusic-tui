@@ -120,7 +120,7 @@ func launch(dir string, visible bool) (context.Context, []context.CancelFunc) {
 		)
 	}
 	actx, acancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	ctx, ccancel := chromedp.NewContext(actx)
+	ctx, ccancel := chromedp.NewContext(actx, chromedp.WithLogf(chromeLog), chromedp.WithErrorf(chromeLog))
 	return ctx, []context.CancelFunc{ccancel, acancel}
 }
 
