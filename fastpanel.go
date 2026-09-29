@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // The view is rebuilt up to 30 times a second and most of its lines (cover
@@ -145,4 +146,67 @@ func joinHorizontalTop(blocks ...string) string {
 		}
 	}
 	return sb.String()
+}
+
+// --- direct colour codes for hot drawing loops ---------------------------
+//
+// lipgloss.Style.Render borrows an ANSI parser from a sync.Pool on every call,
+// and the pool is emptied at every GC. The torus, sphere and bars called
+// Render per cell run / per bar segment -- thousands of times a frame -- so
+// the parsers were rebuilt constantly: 56% of all bytes allocated per frame
+// (profiled 2026-09-29), and the GC work that goes with it. Hot loops write
+// the colour escape directly instead, cached per colour and profile.
+
+type fgKey struct {
+	c lipgloss.Color
+	p termenv.Profile
+}
+
+var (
+	fgMu    sync.Mutex
+	fgCache = map[fgKey]string{}
+)
+
+// fgSeq is the escape that sets the foreground to c ("" on an ASCII-only
+// terminal).
+func fgSeq(c lipgloss.Color) string {
+	k := fgKey{c, lipgloss.ColorProfile()}
+	fgMu.Lock()
+	s, ok := fgCache[k]
+	fgMu.Unlock()
+	if ok {
+		return s
+	}
+	if k.p != termenv.Ascii {
+		if seq := k.p.Color(string(c)); seq != nil {
+			s = termenv.CSI + seq.Sequence(false) + "m"
+		}
+	}
+	fgMu.Lock()
+	if len(fgCache) > 1024 {
+		clear(fgCache)
+	}
+	fgCache[k] = s
+	fgMu.Unlock()
+	return s
+}
+
+// resetSeq ends a coloured run ("" on an ASCII-only terminal).
+func resetSeq() string {
+	if lipgloss.ColorProfile() == termenv.Ascii {
+		return ""
+	}
+	return "\x1b[0m"
+}
+
+// colored wraps s in c: what lipgloss.NewStyle().Foreground(c).Render(s)
+// produces for a single-line s, without the parser.
+func colored(sb *strings.Builder, c lipgloss.Color, s string) {
+	if seq := fgSeq(c); seq != "" {
+		sb.WriteString(seq)
+		sb.WriteString(s)
+		sb.WriteString(resetSeq())
+		return
+	}
+	sb.WriteString(s)
 }

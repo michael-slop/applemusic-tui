@@ -93,6 +93,21 @@ func orbTubeRadii(samples int, bands [32]float64) []float64 {
 	return radii
 }
 
+// The sample grid never changes, so its sines and cosines are computed once.
+// Same math.Sincos calls on the same arguments as before, only not 28,260
+// times a frame: the output is bit-identical (TestOrbPanelTablesAreExact).
+var orbThetaSin, orbThetaCos, orbPhiSin, orbPhiCos = func() (a, b, c, d []float64) {
+	a, b = make([]float64, orbThetaSamples), make([]float64, orbThetaSamples)
+	for i := range a {
+		a[i], b[i] = math.Sincos(2 * math.Pi * float64(i) / orbThetaSamples)
+	}
+	c, d = make([]float64, orbPhiSamples), make([]float64, orbPhiSamples)
+	for i := range c {
+		c[i], d[i] = math.Sincos(2 * math.Pi * float64(i) / orbPhiSamples)
+	}
+	return
+}()
+
 func orbPanel(w, h int, spin, wobble float64, bands [32]float64) string {
 	if w < 4 || h < 2 {
 		return strings.Repeat(" ", max(0, w))
@@ -120,9 +135,9 @@ func orbPanel(w, h int, spin, wobble float64, bands [32]float64) string {
 	}
 
 	for ti := 0; ti < orbThetaSamples; ti++ {
-		sinTheta, cosTheta := math.Sincos(2 * math.Pi * float64(ti) / orbThetaSamples)
+		sinTheta, cosTheta := orbThetaSin[ti], orbThetaCos[ti]
 		for pi := 0; pi < orbPhiSamples; pi++ {
-			sinPhi, cosPhi := math.Sincos(2 * math.Pi * float64(pi) / orbPhiSamples)
+			sinPhi, cosPhi := orbPhiSin[pi], orbPhiCos[pi]
 
 			circleX := ring + tube[pi]*cosTheta
 			circleY := tube[pi] * sinTheta
@@ -165,26 +180,21 @@ func orbPanel(w, h int, spin, wobble float64, bands [32]float64) string {
 // come forward. Same three-step ramp the bars use, so every mode reads as one
 // family and the theme key keeps working untouched.
 func paintCells(cells []byte, shade []int, w, h int) string {
-	styles := [3]lipgloss.Style{
-		lipgloss.NewStyle().Foreground(accentLo),
-		lipgloss.NewStyle().Foreground(accent),
-		lipgloss.NewStyle().Foreground(accentHi),
-	}
-
+	colors := [3]lipgloss.Color{accentLo, accent, accentHi}
 	var out strings.Builder
+	out.Grow(h * (w + 24))
 	for row := 0; row < h; row++ {
-		var line, run strings.Builder
-		cur := -1
-		flush := func() {
-			if run.Len() == 0 {
+		cur, start := -1, 0
+		flush := func(end int) {
+			if end <= start {
 				return
 			}
+			run := cells[row*w+start : row*w+end]
 			if cur < 0 {
-				line.WriteString(run.String())
+				out.Write(run)
 			} else {
-				line.WriteString(styles[cur].Render(run.String()))
+				colored(&out, colors[cur], string(run))
 			}
-			run.Reset()
 		}
 		for col := 0; col < w; col++ {
 			idx := row*w + col
@@ -193,13 +203,11 @@ func paintCells(cells []byte, shade []int, w, h int) string {
 				want = min(2, shade[idx]*3/len(orbRamp))
 			}
 			if want != cur {
-				flush()
-				cur = want
+				flush(col)
+				cur, start = want, col
 			}
-			run.WriteByte(cells[idx])
 		}
-		flush()
-		out.WriteString(line.String())
+		flush(w)
 		if row < h-1 {
 			out.WriteByte('\n')
 		}

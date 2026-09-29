@@ -1344,8 +1344,6 @@ func (m model) vizPanel(w, h int) string {
 		} else if zone > 0.33 {
 			color = accent
 		}
-		st := lipgloss.NewStyle().Foreground(color)
-		markSt := lipgloss.NewStyle().Foreground(fgDim)
 		var row strings.Builder
 		for i := 0; i < bars; i++ {
 			// A marker only shows where the bar itself is not already drawn.
@@ -1353,12 +1351,12 @@ func (m model) vizPanel(w, h int) string {
 				heights[i] <= level-1
 			switch {
 			case heights[i] >= level:
-				row.WriteString(st.Render("██"))
+				colored(&row, color, "██")
 			case heights[i] > level-1:
 				c := string(partial[min(7, int((heights[i]-level+1)*8))])
-				row.WriteString(st.Render(c + c))
+				colored(&row, color, c+c)
 			case mark:
-				row.WriteString(markSt.Render("▔▔"))
+				colored(&row, fgDim, "▔▔")
 			default:
 				row.WriteString("  ")
 			}
@@ -1644,10 +1642,14 @@ func (m model) View() string {
 	top := joinHorizontalTop(left, right)
 
 	tw := m.w - 2
-	transport := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(map[bool]lipgloss.Color{true: m.pulsedAccent(), false: borderDim}[m.focus == focusPlayer]).
-		Width(tw).Render(m.transportPanel(tw))
+	// borderedBox, not a Width()-styled lipgloss Render: that path borrows a
+	// parser whose pool is emptied at every GC and re-allocated at 4 MB, once
+	// per frame -- most of the bytes amtui allocated (profiled 2026-09-29).
+	bc := borderDim
+	if m.focus == focusPlayer {
+		bc = m.pulsedAccent()
+	}
+	transport := borderedBox(m.transportPanel(tw), tw, 0, bc)
 
 	return joinVerticalLeft(top, transport)
 }

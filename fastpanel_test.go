@@ -63,3 +63,32 @@ func TestJoinsMatchLipgloss(t *testing.T) {
 		}
 	}
 }
+
+func TestColoredMatchesLipglossRender(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+	for _, p := range []termenv.Profile{termenv.TrueColor, termenv.ANSI256, termenv.ANSI, termenv.Ascii} {
+		lipgloss.SetColorProfile(p)
+		for _, c := range []lipgloss.Color{"#62E670", "#3D8FA8", "240", "#FFFFFF"} {
+			for _, s := range []string{"██", "▔▔", ".,-~:;=!*#$@", "x"} {
+				var sb strings.Builder
+				colored(&sb, c, s)
+				if want := lipgloss.NewStyle().Foreground(c).Render(s); sb.String() != want {
+					t.Fatalf("profile %v colour %s: got %q want %q", p, c, sb.String(), want)
+				}
+			}
+		}
+	}
+}
+
+func TestBorderedBoxWithoutHeightMatchesLipgloss(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+	for _, c := range []string{"one line", "two\nlines", lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")).Render("red") + "\n▄▄ ⏸ 0:17"} {
+		want := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3A3A3C")).Width(30).Render(c)
+		if got := borderedBox(c, 30, 0, lipgloss.Color("#3A3A3C")); got != want {
+			t.Fatalf("got %q\nwant %q", got, want)
+		}
+	}
+}
