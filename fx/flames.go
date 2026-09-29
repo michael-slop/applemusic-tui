@@ -36,9 +36,10 @@ import "math"
 //
 // How it hears the music:
 //   - Kick (the beat pulse) raises the seed value, i.e. the flame height: each
-//     bass hit throws the fire up by up to +35, then it settles back to 65.
+//     bass hit throws the fire up by up to +14, then it settles back to 65
+//     (+35 saturated the fire: two thirds of it at the hottest glyph).
 //   - Drive(Bass) raises the seeding density: a busy bass line lights up to
-//     twice as many sources along the bottom row.
+//     40% more sources along the bottom row.
 //   - Paused (Playing false) or reactivity 0: exactly the gist.
 
 // flamesChars is the gist's ten-character ramp, coldest first.
@@ -58,8 +59,8 @@ const (
 	flamesTick = 0.1
 	// Music: how far a full kick raises the seed value, and how much a full
 	// bass drive multiplies the number of sources.
-	flamesKickLift  = 35
-	flamesBassDense = 1.0
+	flamesKickLift  = 14
+	flamesBassDense = 0.4
 )
 
 type flames struct {

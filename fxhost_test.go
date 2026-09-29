@@ -17,10 +17,10 @@ type probeFx struct {
 	lastKick   float64
 }
 
-func (p *probeFx) Name() string            { return "zz-probe" }
-func (p *probeFx) Resize(c, r int)         { p.cols, p.rows = c, r }
+func (p *probeFx) Name() string             { return "zz-probe" }
+func (p *probeFx) Resize(c, r int)          { p.cols, p.rows = c, r }
 func (p *probeFx) SetPalette(pl fx.Palette) { p.pal = pl }
-func (p *probeFx) Step(a fx.Audio)         { p.steps++; p.lastKick = a.Kick }
+func (p *probeFx) Step(a fx.Audio)          { p.steps++; p.lastKick = a.Kick }
 func (p *probeFx) Cell(c, r int) (rune, fx.RGB, bool) {
 	if c < 0 || r < 0 || c >= p.cols || r >= p.rows {
 		return 0, fx.RGB{}, false
