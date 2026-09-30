@@ -188,11 +188,11 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 There is no separate Windows version to pull: this repository's `main` is the
 Windows, Linux and macOS build at once, and Go picks the right files for each.
 
-`install.ps1` builds with Go when it is installed, otherwise it downloads the
-latest Windows release — this fork has not published one yet, so install Go
-first (`winget install GoLang.Go`, 1.26 or newer). It installs to
-`%LOCALAPPDATA%\Programs\amtui` and adds that to your user PATH. You also need
-Google Chrome: `winget install Google.Chrome`.
+`install.ps1` builds with Go when it is installed (1.26 or newer), otherwise it
+downloads the [latest release](https://github.com/michael-slop/applemusic-tui/releases/latest)
+of this fork — no Go needed. It installs to `%LOCALAPPDATA%\Programs\amtui` and
+adds that to your user PATH. You also need Google Chrome:
+`winget install Google.Chrome`.
 
 To update: `git pull`, then run `install.ps1` again — it can replace amtui
 while it is still running.
