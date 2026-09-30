@@ -1,5 +1,16 @@
 # amtui fork — Windows handoff (for a Claude Code session on Twin_Towers)
 
+> **STATUS 2026-09-29 (night), from the session on Twin_Towers:** the checklist
+> below is done. Go works; `install.ps1` ran under Windows PowerShell 5.1 and 7
+> (three installer bugs fixed); sign-in, full tracks and the WASAPI visualizer
+> work; the hidden Chrome is parked as a tool window (item 5 — minimizing hides
+> the page, measured with `bench/winwindowprobe`); Chrome now dies with amtui
+> (a job object) and a leftover one is cleared at startup. Two new findings:
+> Alacritty's screen "rolled" because Apple Music sends some titles decomposed
+> (`c` + U+0327) and the inbox ConPTY gives the mark its own cell — all MusicKit
+> JSON and lyrics are NFC-normalized now; and a new `plasma-square` mode. The
+> full account is the necronomicon, Chapter 29 §29.7. The original text follows.
+
 Written 2026-09-29 by the Claude session on SnatchedLenix7 (the Linux laptop).
 Repo: https://github.com/michael-slop/applemusic-tui (branch `main`, same as
 `power-tuning`). Upstream: https://github.com/k1y0miiii/applemusic-tui.
