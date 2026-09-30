@@ -44,7 +44,17 @@ if ($Binary) {
   Push-Location $PSScriptRoot
   try {
     $env:CGO_ENABLED = "0"
-    go build -trimpath -ldflags="-s -w" -o $staged .
+    # Same version label as the Makefile: exact tag, else short SHA, else dev.
+    # Windows PowerShell 5.1 turns a native command's stderr into a
+    # terminating error under "Stop", so git runs with errors tolerated.
+    $version = & {
+      $ErrorActionPreference = "Continue"
+      $v = git describe --tags --exact-match 2>$null
+      if (-not $v) { $v = git rev-parse --short HEAD 2>$null }
+      $v
+    }
+    if (-not $version) { $version = "dev" }
+    go build -trimpath -ldflags="-s -w -X main.version=$version" -o $staged .
     if ($LASTEXITCODE -ne 0) { throw "go build failed" }
   } finally { Pop-Location }
 } else {
@@ -62,14 +72,29 @@ if ($Binary) {
   Remove-Item -Recurse -Force $unz, $zip
 }
 
+# Windows can rename a running exe but not overwrite or delete it, so an amtui
+# that is still open moves aside to a unique name instead of failing the
+# upgrade. Aside copies whose amtui has since exited are swept on each install.
+Get-ChildItem $Prefix -Filter "amtui.exe.old*" -ErrorAction SilentlyContinue |
+  Remove-Item -Force -ErrorAction SilentlyContinue
+if (Test-Path $target) { Move-Item $target "$target.old-$([DateTime]::Now.Ticks)" -Force }
 Move-Item $staged $target -Force
 Write-Host "`nInstalled: $target"
 
 if (-not $NoPath) {
-  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  # Read and write the raw registry value: [Environment]'s Path API expands
+  # %USERPROFILE%-style entries and stores the result as REG_SZ, flattening
+  # the stock Windows user PATH.
+  $envKey = Get-Item HKCU:\Environment
+  $userPath = $envKey.GetValue("Path", "", "DoNotExpandEnvironmentNames")
   $parts = @($userPath -split ";" | Where-Object { $_ })
   if ($parts -notcontains $Prefix) {
-    [Environment]::SetEnvironmentVariable("Path", (($parts + $Prefix) -join ";"), "User")
+    Set-ItemProperty HKCU:\Environment -Name Path -Value (($parts + $Prefix) -join ";") -Type ExpandString
+    # Tell Explorer the environment changed so new terminals see the new PATH.
+    $sig = '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, UIntPtr w, string l, uint f, uint t, out UIntPtr r);'
+    $user32 = Add-Type -MemberDefinition $sig -Name Env -Namespace AmtuiInstall -PassThru
+    $r = [UIntPtr]::Zero
+    [void]$user32::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, "Environment", 2, 5000, [ref]$r)
     Write-Host "Added $Prefix to your user PATH. Open a new terminal to use 'amtui'."
   }
 }
