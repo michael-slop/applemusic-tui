@@ -121,6 +121,7 @@ func (s *Service) run() {
 			}
 			s.latest.Store(&Frame{
 				Bands:  bands,
+				Onsets: s.analyzer.Onsets(),
 				Source: s.sourceName,
 				Live:   true,
 				At:     time.Now(),

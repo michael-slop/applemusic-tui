@@ -40,7 +40,12 @@ type Analyzer struct {
 	// spectrum is exactly zero, so the FFT is skipped (it was a third of
 	// paused amtui's CPU).
 	silent int
+
+	onset *onsetDetector // drum hits, on their own short window (onset.go)
 }
+
+// Onsets returns the current per-group hit pulses (onset.go).
+func (a *Analyzer) Onsets() Onsets { return a.onset.onsets() }
 
 func NewAnalyzer(format Format) (*Analyzer, error) {
 	if format.SampleRate <= 0 {
@@ -58,6 +63,7 @@ func NewAnalyzer(format Format) (*Analyzer, error) {
 		binBand:     make([]int, windowFrames/2+1),
 		hopFrames:   max(1, format.SampleRate/30),
 		framesToHop: max(1, format.SampleRate/30),
+		onset:       newOnsetDetector(format),
 	}
 	for channel := 0; channel < format.Channels; channel++ {
 		analyzer.ring[channel] = make([]float64, windowFrames)
@@ -110,6 +116,7 @@ func (a *Analyzer) Process(interleaved []float32) ([bandCount]float64, error) {
 	if frames == 0 {
 		return a.bands, nil
 	}
+	a.onset.process(interleaved)
 
 	for offset := 0; offset < frames; {
 		step := min(a.framesToHop, frames-offset)

@@ -25,6 +25,7 @@ type Source interface {
 
 type Frame struct {
 	Bands  [32]float64
+	Onsets Onsets // drum-hit pulses (onset.go)
 	Source string
 	Live   bool
 	At     time.Time
