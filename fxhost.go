@@ -61,8 +61,17 @@ func (m *model) ensureFx() *fxHost {
 	return m.fx
 }
 
-// stepFx advances the effect one frame (called from stepFrame).
-func (m *model) stepFx() {
+// stepFx advances the effect by frames 30 fps frames. Effects clamp a Step to
+// 0.25 s, so a long catch-up is fed in steps of at most six frames (0.2 s).
+func (m *model) stepFx(frames int) {
+	for frames > 0 {
+		n := min(frames, 6)
+		m.stepFxBy(n)
+		frames -= n
+	}
+}
+
+func (m *model) stepFxBy(frames int) {
 	h := m.ensureFx()
 	if h == nil || h.cols == 0 {
 		return // not drawn yet: Resize happens on the first render
@@ -73,8 +82,8 @@ func (m *model) stepFx() {
 		Bass: f.bass, Mid: f.mid, Treble: f.treble, Kick: f.kick,
 		Playing: f.playing, Reactivity: m.reactivity,
 		// Time itself runs at the music's pace: nearly still when it is off.
-		DT:   1.0 / 30 * m.motionSpeed(),
-		Wall: 1.0 / 30,
+		DT:   float64(frames) / 30 * m.motionSpeed(),
+		Wall: float64(frames) / 30,
 	}
 	if !configBool(m.cfg, "visualizer.reactive", true) {
 		a.Reactivity = 0

@@ -150,7 +150,9 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 	if m.st.Dur > 0 && m.st.Playing {
 		m.wv.record(float64(m.st.Pos)/float64(m.st.Dur), bandsLevel(m.vizBands))
 	}
-	m.stepFx()
+	if !m.fxDeferred {
+		m.stepFx(1)
+	}
 	scrobble := m.advanceScrobble(time.Second / 30)
 	return tea.Batch(visualizerClose, scrobble)
 }
@@ -180,6 +182,7 @@ type model struct {
 	vizReact    reactive    // per-band contrast signal for the animated visualizers (react.go)
 	colors      colorEditor // the hidden colour controller (? then c)
 	lyCollapsed bool        // no lyrics for this track: the visualizer takes the lyrics rows
+	fxDeferred  bool        // a catch-up tick: stepFrame leaves the effect to one stepFx(frames)
 	// browser sleep (see sleep.go)
 	engRef        *atomic.Pointer[engine.Engine] // what MPRIS controls act on
 	mprisWake     chan wakeIntent
@@ -573,10 +576,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastFrame = now
 		var cmds []tea.Cmd
+		// The effect only shows its last catch-up frame, so it takes the
+		// elapsed time in one Step instead of six (at the idle rate that was
+		// a full 30 steps a second for 5 redraws).
+		m.fxDeferred = frames > 1
 		for range frames {
 			if c := m.stepFrame(now); c != nil {
 				cmds = append(cmds, c)
 			}
+		}
+		if m.fxDeferred {
+			m.fxDeferred = false
+			m.stepFx(frames)
 		}
 		cmds = append(cmds, tick(m.frameInterval()))
 		return m, tea.Batch(cmds...)
@@ -1094,12 +1105,18 @@ func (m model) queuePanel(w, h int) string {
 		if i == m.st.QueuePos {
 			prefix, ts, as = "▶ ", fgBright, fgDim
 		}
-		left := lipgloss.NewStyle().Foreground(accentHi).Render(prefix) +
-			lipgloss.NewStyle().Foreground(ts).Render(tr.Title) +
-			lipgloss.NewStyle().Foreground(as).Render(" — "+tr.Artist)
-		dur := lipgloss.NewStyle().Foreground(fgFaint).Render(fmtTime(tr.Duration))
-		gap := w - lipgloss.Width(left) - lipgloss.Width(dur) - 1
-		line := left + strings.Repeat(" ", max(1, gap)) + dur
+		// Direct colour codes, widths from the plain text: styling each row
+		// through lipgloss re-parsed every colour and every escape, and was the
+		// biggest part of a paused redraw.
+		var lb strings.Builder
+		colored(&lb, accentHi, prefix)
+		colored(&lb, ts, tr.Title)
+		colored(&lb, as, " — "+tr.Artist)
+		d := fmtTime(tr.Duration)
+		gap := w - cellWidth(prefix+tr.Title+" — "+tr.Artist) - cellWidth(d) - 1
+		lb.WriteString(strings.Repeat(" ", max(1, gap)))
+		colored(&lb, fgFaint, d)
+		line := lb.String()
 		if m.focus == focusQueue && i == m.selIdx {
 			line = lipgloss.NewStyle().Background(selBg).Render(pad(line, w))
 		}

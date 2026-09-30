@@ -35,6 +35,11 @@ type Analyzer struct {
 	hopFrames   int
 	framesToHop int
 	bands       [bandCount]float64
+	// silent counts the trailing all-zero frames in the ring. A paused player
+	// still streams digital silence; once a whole window of it is buffered the
+	// spectrum is exactly zero, so the FFT is skipped (it was a third of
+	// paused amtui's CPU).
+	silent int
 }
 
 func NewAnalyzer(format Format) (*Analyzer, error) {
@@ -126,7 +131,7 @@ func (a *Analyzer) analyzeHop() {
 	var powers [bandCount]float64
 	amplitudeScale := 2 / a.windowSum
 	powerScale := 1 / (float64(a.format.Channels) * a.windowENBW)
-	for channel := 0; channel < a.format.Channels; channel++ {
+	for channel := 0; channel < a.format.Channels && a.silent < windowFrames; channel++ {
 		a.windowChannel(channel)
 		a.fft.Coefficients(a.coeff[channel], a.scratch)
 		for bin := 1; bin < len(a.coeff[channel]); bin++ {
@@ -159,8 +164,16 @@ func (a *Analyzer) analyzeHop() {
 func (a *Analyzer) appendFrames(interleaved []float32, frames int) {
 	for frame := 0; frame < frames; frame++ {
 		base := frame * a.format.Channels
+		zero := true
 		for channel := 0; channel < a.format.Channels; channel++ {
-			a.ring[channel][a.write] = float64(interleaved[base+channel])
+			v := interleaved[base+channel]
+			a.ring[channel][a.write] = float64(v)
+			zero = zero && v == 0
+		}
+		if !zero {
+			a.silent = 0
+		} else if a.silent < windowFrames {
+			a.silent++
 		}
 		a.write++
 		if a.write == windowFrames {
