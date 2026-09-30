@@ -49,6 +49,7 @@ What changed:
   installer, and Windows-safe tests.
 - **The panefx animations.** ASCII effects ported from
   [panefx](https://github.com/michael-slop) — flames, fire, waves, plasma,
+  plasma-square (plasma folded into four mirrored quadrants that fill the panel),
   tunnel, starfield, cube — as visualizer modes
   (`v` / `V` cycle; `go run ./bench/fxdemo <name> 80 24 10` runs one alone
   against live audio). Each keeps its panefx look at reactivity 0 and
@@ -165,13 +166,14 @@ through the system mixer (the web player serves AAC 256; no lossless).
 > special workspace (Wayland forbids offscreen positioning); other Wayland
 > compositors may leave the window visible for now.
 
-> Windows: the visualizer captures system audio through WASAPI loopback
-> (verified on Windows 11), and the test suite passes there, including the
-> Chrome-driven engine tests. Install with `install.ps1` (below) and use
-> Windows Terminal — the legacy console does not render the TUI correctly.
-> Media keys work through Chrome's own Windows media integration while the
-> browser is awake; a media key does not wake a sleeping browser on Windows
-> (press space in amtui). The hidden browser window may show in the taskbar.
+> Windows: verified on Windows 11 — sign-in, full tracks, the WASAPI loopback
+> visualizer, and the whole test suite. Install with `install.ps1` (below) and
+> run it in Windows Terminal or Alacritty; the legacy console does not render
+> the TUI correctly. The hidden browser stays out of the taskbar, Alt+Tab and
+> tiling window managers (it is parked offscreen as a tool window), and it
+> closes with amtui however amtui exits. Media keys work through Chrome's own
+> Windows media integration while the browser is awake; a media key does not
+> wake a sleeping browser on Windows (press space in amtui).
 
 ## Install
 
@@ -183,9 +185,22 @@ cd applemusic-tui
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
+There is no separate Windows version to pull: this repository's `main` is the
+Windows, Linux and macOS build at once, and Go picks the right files for each.
+
 `install.ps1` builds with Go when it is installed, otherwise it downloads the
-latest Windows release. It installs to `%LOCALAPPDATA%\Programs\amtui` and adds
-that to your user PATH. You also need Chrome: `winget install Google.Chrome`.
+latest Windows release — this fork has not published one yet, so install Go
+first (`winget install GoLang.Go`, 1.26 or newer). It installs to
+`%LOCALAPPDATA%\Programs\amtui` and adds that to your user PATH. You also need
+Google Chrome: `winget install Google.Chrome`.
+
+To update: `git pull`, then run `install.ps1` again — it can replace amtui
+while it is still running.
+
+If `amtui` is "not recognized" in a new terminal, that terminal inherited its
+PATH from whatever started it before the install — a window manager such as
+GlazeWM, or a launcher. Restart that program (or sign out and back in); until
+then, run `& "$env:LOCALAPPDATA\Programs\amtui\amtui.exe"`.
 
 ### Prebuilt binaries
 
