@@ -1,6 +1,9 @@
 package main
 
 import (
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -103,6 +106,16 @@ func TestPresetRowSelectsTheHousePalette(t *testing.T) {
 // Every preset must be usable: valid colours, a unique name, and text that
 // reads against the selection background.
 func TestEveryThemePresetIsUsable(t *testing.T) {
+	checkThemesUsable(t)
+	if len(themes) < 18 {
+		t.Fatalf("expected the IDE presets to be registered, have %d themes", len(themes))
+	}
+}
+
+// checkThemesUsable: valid colours, unique names, text that reads against the
+// selection background (either way round: light themes are dark-on-light).
+func checkThemesUsable(t *testing.T) {
+	t.Helper()
 	seen := map[string]bool{}
 	for _, th := range themes {
 		if seen[th.name] {
@@ -116,11 +129,46 @@ func TestEveryThemePresetIsUsable(t *testing.T) {
 		}
 		text, _ := colorful.Hex(string(th.fgBright))
 		sel, _ := colorful.Hex(string(th.selBg))
-		if _, _, lt := text.Hcl(); func() bool { _, _, ls := sel.Hcl(); return lt-ls < 0.35 }() {
+		if _, _, lt := text.Hcl(); func() bool { _, _, ls := sel.Hcl(); return math.Abs(lt-ls) < 0.35 }() {
 			t.Errorf("%s: text %s does not stand out from the selection %s", th.name, th.fgBright, th.selBg)
 		}
 	}
-	if len(themes) < 18 {
-		t.Fatalf("expected the IDE presets to be registered, have %d themes", len(themes))
+}
+
+// The menu shared with color.mesh: built from ~/.config/color.mesh/presets.conf
+// and the Omarchy themes' colors.toml, keeping amtui's own apple/mono/auto,
+// and every preset it produces must be usable (checked above for all themes).
+func TestMeshPresetsReplaceTheIDEBlock(t *testing.T) {
+	saved := append([]theme(nil), themes...)
+	defer func() { themes = saved }()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OMARCHY_PATH", filepath.Join(home, "omarchy"))
+	write := func(p, s string) {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(s), 0o644)
 	}
+	write(filepath.Join(home, ".config/color.mesh/presets.conf"),
+		"# shared\nhouse | slop | slop (house)\nIDE | dracula | Dracula\nlight | white | White\nIDE | missing | Not Installed\n")
+	write(filepath.Join(home, ".config/omarchy/themes/dracula/colors.toml"),
+		"accent = \"#bd93f9\"\nbackground = \"#282a36\"\nforeground = \"#f8f8f2\"\ncolor8 = \"#6272a4\"\n")
+	write(filepath.Join(home, "omarchy/themes/white/colors.toml"),
+		"accent = \"#6e6e6e\"\nbackground = \"#ffffff\"\nforeground = \"#000000\"\nselection_background = \"#000000\"\n")
+	if !loadMeshPresets() {
+		t.Fatal("shared presets should load")
+	}
+	var names []string
+	for _, th := range themes {
+		names = append(names, th.name)
+	}
+	if got := strings.Join(names, ","); got != "apple,slop,dracula,white,mono,auto" {
+		t.Fatalf("menu = %s", got)
+	}
+	if d := themeByName("dracula"); d.accent != "#bd93f9" || d.fgFaint != "#6272a4" {
+		t.Fatalf("dracula mapped as %+v", *d)
+	}
+	if w := themeByName("white"); w.selBg == "#000000" {
+		t.Fatal("selection must be a raised background, never an inverse-video foreground")
+	}
+	checkThemesUsable(t)
 }

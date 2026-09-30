@@ -70,6 +70,10 @@ What changed:
   gruvbox, nord, mono, slop, tokyo-night, dracula, one-dark, rose-pine,
   kanagawa, everforest, solarized, monokai-pro, github-dark, ayu-mirage,
   night-owl, auto (follows the album art). `t` cycles them too.
+  **On an Omarchy desktop with color.mesh**, the preset menu comes from the
+  shared list `~/.config/color.mesh/presets.conf` instead (27 grouped themes,
+  each read from its Omarchy `colors.toml`), plus apple, mono and auto — the
+  same menu as the desktop picker; choosing here still only recolours amtui.
 - **Lyrics panel collapses** when a track has none; the visualizer takes the
   column (`lyrics.collapse_when_missing = false` to keep it).
 - **No 4 MB parser churn.** lipgloss borrows an ANSI parser with a 4 MB

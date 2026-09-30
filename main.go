@@ -1684,8 +1684,13 @@ func main() {
 	m.reactivity = loadReactivity(m.cfg)
 	m.scrobbler = newScrobbler(m.cfg)
 	m.artCache = newArtCache(8)
+	loadMeshPresets() // the preset menu shared with color.mesh, where it exists
 	loadCustomTheme()
-	t := themeFromConfig(m.cfg, loadThemeName())
+	saved := loadThemeName()
+	if to, ok := legacyThemeNames[saved]; ok && themeByName(to) != nil {
+		saved = to
+	}
+	t := themeFromConfig(m.cfg, saved)
 	m.themeName = t.name
 	applyTheme(t)
 	// Cell motion rather than all motion: the app only reacts to clicks and the
