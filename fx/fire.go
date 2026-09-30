@@ -1,126 +1,61 @@
 package fx
 
-// "Fire": heat-dissipation fire, ported from panefx's fire.rs, which ports
-// mhearse/asciifire (asciifire.py), itself a port of Thiemo Mattig's
-// JavaScript at http://maettig.com/code/javascript/asciifire.html.
+import "math"
+
+// "Fire": the burning waterfall -- the song's recent spectrum history, rising
+// like heat off a fire.
 //
-// The algorithm:
-//   - seed an OFF-SCREEN bottom row with random heat each frame
-//   - every other cell becomes a centre-weighted average of the three cells
-//     below it, which both spreads heat sideways and carries it upward
-//   - a jittered decay keeps the fire from saturating
-//   - map the result to an index in an 8-glyph ramp, dithered per cell
+// The columns are the frequency axis, NOT mirrored: bass on the left, treble
+// on the right, at full detail. The bottom row is the spectrum right now;
+// each row above it is an older spectrum (a History, one spectrum pushed per
+// fireStep seconds of music time), so what the song did a moment ago drifts
+// upward and cools. The heat at (col, row) is
 //
-// Colours: panefx interpolated the 7 drawn shades between two endpoints of
-// its green ramp (dark green -> near-white green). Here the same 7 steps run
-// up the theme ramp, from just above its darkest stop to AccentHi.
+//	BandAt(spectrum aged rows-from-bottom, col) x fade(age)
 //
-// Timing: panefx stepped fire once per panel frame at its default 10 fps;
-// here it runs on a 100 ms accumulator so amtui's 30 fps calls do not triple
-// its speed.
+// and picks both the glyph (panefx's asciifire ramp " .:*sS#$") and the
+// colour (up the theme ramp, so the colour controller recolours it). A band
+// that is up now is a hot column at the base; as it rises it cools into a
+// tongue of flame. A steady spectrum fills every history row alike, so the
+// picture holds still: the only motion is the song's own history scrolling
+// upward (declared as FreeMotion "scroll"), and that scroll runs on Audio.DT,
+// which amtui already paces to the music (4% speed in silence).
 //
-// Cells: fire already scales its cooling with the panel's row count (see
-// fireDecayForRows), so the taller terminal cell needs no adaptation.
+// Cells are ~1:2, so a row of rise covers as much distance as two columns: at
+// 20 rows a second the fire climbs briskly without smearing.
 //
 // How it hears the music:
-//   - Drive(Bass) lowers the cooling (up to 35% less), so a bass line lets
-//     the tongues climb higher.
-//   - Kick makes the seed row burn hotter: fewer cold gaps in the source row
-//     (the cold fraction drops from 25% to ~10% on a full hit), so each beat
-//     sends up a denser wave of flame.
-//   - The spectrum shapes it: each column cools at a rate set by the band
-//     beneath it (mirrored: bass in the middle, treble at both edges), so the
-//     tongues stand tallest over whatever is loudest for this song.
-//   - Paused (Playing false) or reactivity 0: exactly the original.
+//   - Each column is its band (Audio.BandAt(col, not mirrored)); every row is
+//     that band at an earlier moment, fading with age toward the top.
+//   - Kick is a global pulse: the whole fire flashes hotter while the kick
+//     decays.
+//   - Silence: the history fills with zeros and the fire goes dark, except a
+//     faint resting ember line along the bottom row. Nothing moves.
 
-// fireRamp is the character ramp from the original, coldest first.
+// fireRamp is the asciifire character ramp, coldest first.
 var fireRamp = [8]rune{' ', '.', ':', '*', 's', 'S', '#', '$'}
 
-// fireSpectrumCool: how much a column's cooling follows its band. A band at
-// +0.5 cools that column 60% less (taller tongues); at -0.5, 60% more.
-const fireSpectrumCool = 0.6
-
 const (
-	fireTick = 0.1 // one simulation frame: panefx's default 10 fps
-	// How much the glyph threshold is dithered, in ramp buckets. ~1 bucket of
-	// spread is enough to shatter the flat bands without visibly softening
-	// the bright core of the fire.
-	fireDither = 1.0
-	// How many rows at the top of the grid are faded to nothing. Deliberately
-	// generous: heat must already be near zero BEFORE it reaches row 0,
-	// otherwise the boundary line reappears at the top of the fade instead.
-	fireTopFadeRows = 6
-	// Music.
-	fireBassCool = 0.35 // cooling removed by a full bass drive
-	fireKickCold = 0.6  // fraction of the cold seeds a full kick heats up
+	fireStep     = 0.05 // seconds of music time per history row (the scroll speed)
+	fireGain     = 1.35 // a band at its normal level (0.5) burns ~2/3 hot at the base
+	fireFadePow  = 1.3  // how quickly heat cools with age (1 = linear to the top)
+	fireKickHeat = 0.35 // a full kick heats everything by this fraction
+	fireEmber    = 0.08 // the resting ember line's heat: a dim '.' along the bottom
+	fireColours  = 64   // colour table resolution
 )
-
-// fireDecayForRows is the per-row cooling, tuned so flames reach a similar
-// FRACTION of the panel height whatever its size. A fixed decay burns out
-// after a roughly fixed number of rows: tuned on 80x25 it filled only the
-// bottom sixth of a full-height terminal. Calibrated so flames reach roughly
-// 60-70% of the way up, which reads as fire rather than a stripe.
-func fireDecayForRows(rows int) float32 {
-	if rows == 0 {
-		return 0.14
-	}
-	// ~15 rows of visible flame at the reference size, scaled by height.
-	return min(max(2.6/float32(rows), 0.02), 0.30)
-}
-
-// fireCellDither is a stable per-cell value in [0,1), hashed from the
-// coordinates. It must be a function of position only: a per-frame random
-// would make every cell in the sparse tail flicker independently, which looks
-// like TV static rather than fire.
-func fireCellDither(col, row int) float32 {
-	h := uint32(col)*0x9E3779B9 ^ uint32(row)*0x85EBCA6B
-	h ^= h >> 15
-	h *= 0x2545F491
-	h ^= h >> 13
-	return float32(h>>8) / float32(1<<24)
-}
-
-// fireTopFade ramps from 0 at row 0 to 1 by fireTopFadeRows.
-func fireTopFade(row, rows int) float32 {
-	// On a very short panel, fading a fixed 6 rows would erase most of the
-	// fire, so scale the band down for small grids.
-	band := max(min(fireTopFadeRows, rows/3), 1)
-	if row >= band {
-		return 1
-	}
-	// Squared so the last row or two go properly dark rather than merely dim.
-	t := float32(row) / float32(band)
-	return t * t
-}
 
 type fire struct {
 	cols, rows int
-	// Heat per cell in [0,1], row-major, row 0 is the TOP of the screen.
-	//
-	// Holds rows+1 rows: the extra final row is the OFF-SCREEN seed row.
-	// Mattig's original is explicit that the random source row is off-screen;
-	// drawing it would show a solid wall of hot glyphs pinned to the bottom
-	// edge instead of flame roots.
-	cells  []float32
-	dither []float32 // fireCellDither per visible cell, precomputed
-	idx    []uint8   // dithered ramp index per visible cell, for Cell
-	// prev is the visible heat before the latest simulation step. The sim
-	// keeps panefx's 10 Hz clock; drawing heat blended from prev to cells by
-	// the fraction of the next tick already elapsed gives 30 distinct images a
-	// second instead of 10, without touching the simulation itself.
-	prev []float32
-	// spec is this frame's spectrum deviation per column (0 at rest).
-	spec []float64
-	rng  *Rand
-	// Cooling factor per row of rise; higher = shorter flames.
-	decay float32
-	acc   float64
-
-	colours [len(fireRamp)]RGB
+	hist       *History
+	acc        float64
+	heat       []float64 // per cell before the kick, row-major, row 0 = top
+	fade       []float64 // per age (rows from the bottom)
+	kick       float64
+	colours    [fireColours]RGB
 }
 
 func newFire() Effect {
-	f := &fire{rng: NewRand(0xF19E)}
+	f := &fire{}
 	f.Resize(0, 0)
 	return f
 }
@@ -129,154 +64,74 @@ func init() { Register("fire", 11, newFire) }
 
 func (f *fire) Name() string { return "fire" }
 
-// Resize preserves nothing: a garbage-preserving copy would look worse than a
-// clean restart.
+// FreeMotion: the history scrolls upward, at the music's pace.
+func (f *fire) FreeMotion() string { return "scroll" }
+
 func (f *fire) Resize(cols, rows int) {
 	cols, rows = max(cols, 0), max(rows, 0)
-	if cols == f.cols && rows == f.rows && f.cells != nil {
+	if cols == f.cols && rows == f.rows && f.hist != nil {
 		return
 	}
 	f.cols, f.rows = cols, rows
-	f.cells = make([]float32, cols*(rows+1))
-	f.idx = make([]uint8, cols*rows)
-	f.prev = make([]float32, cols*rows)
-	f.spec = make([]float64, cols)
-	f.dither = make([]float32, cols*rows)
-	for r := range rows {
-		for c := range cols {
-			f.dither[r*cols+c] = fireCellDither(c, r)
-		}
+	f.hist = NewHistory(max(rows, 1))
+	f.acc = 0
+	f.heat = make([]float64, cols*rows)
+	f.fade = make([]float64, rows)
+	for age := range rows {
+		f.fade[age] = math.Pow(1-float64(age)/float64(rows), fireFadePow)
 	}
-	// Must re-tune: the old decay leaves flames the wrong height.
-	f.decay = fireDecayForRows(rows)
+	f.fill([32]float64{})
 }
 
 func (f *fire) SetPalette(p Palette) {
-	// Index 0 is the blank glyph and never drawn; 1..7 climb the theme ramp,
-	// as panefx interpolated them between its two green endpoints.
-	for i := 1; i < len(f.colours); i++ {
-		t := float64(i-1) / float64(len(f.colours)-2)
-		f.colours[i] = p.At(0.15 + 0.6*t)
+	for i := range f.colours {
+		f.colours[i] = p.At(0.1 + 0.9*float64(i)/float64(len(f.colours)-1))
 	}
 }
 
 func (f *fire) Step(a Audio) {
-	f.acc = min(f.acc+a.DT, 1)
-	var kick, bass float64
-	if a.Playing {
-		kick, bass = min(max(a.Kick, 0), 1), Drive(a.Bass)
-	}
-	if len(f.spec) == f.cols {
-		a.SpectrumRow(f.spec, true)
-	}
-	for f.acc >= fireTick {
-		f.acc -= fireTick
-		if len(f.prev) == f.cols*f.rows {
-			copy(f.prev, f.cells[:f.cols*f.rows])
+	f.kick = min(max(a.Kick, 0), 1)
+	// One spectrum per fireStep of music time; after a stall, never push
+	// more than the history can hold.
+	f.acc += max(a.DT, 0)
+	for n := 0; f.acc >= fireStep; n++ {
+		f.acc -= fireStep
+		if n < f.hist.Depth() {
+			f.hist.Push(a.React)
 		}
-		f.advance(float32(kick), float32(bass))
 	}
-	f.quantise(float32(f.acc / fireTick))
+	f.fill(a.React)
 }
 
-// advance is one frame of the original.
-func (f *fire) advance(kick, bass float32) {
-	if f.cols == 0 || f.rows == 0 {
-		return
-	}
-	cols, rows := f.cols, f.rows
-
-	// Seed the OFF-SCREEN row with fresh random heat. Some cells are seeded
-	// cold, which is what carves the gaps between flame tongues: a uniformly
-	// hot base gives an unbroken sheet of fire.
-	cold := float32(0.25) * (1 - fireKickCold*kick)
-	seed := f.cells[rows*cols:]
-	for c := range cols {
-		v := float32(f.rng.Float())
-		if v < cold {
-			seed[c] = v * 0.7
-		} else {
-			seed[c] = 0.75 + v*0.25
+// fill recomputes every cell's heat: the bottom row from the live spectrum,
+// each row above it from the history, faded with age.
+func (f *fire) fill(now [32]float64) {
+	for age := range f.rows {
+		src := Audio{React: now}
+		if age > 0 {
+			src.React = f.hist.At(age - 1)
 		}
-	}
-
-	decay := f.decay * (1 - fireBassCool*bass)
-	// Propagate upward, walking top-down so each row reads the
-	// not-yet-updated row beneath it.
-	//
-	// The kernel is CENTRE-WEIGHTED. An even left/centre/right average is a
-	// strong horizontal blur applied every frame: it smears vertical
-	// structure away, leaving flat horizontal bands. Weighting the cell
-	// directly below far more heavily lets heat climb in columns, and the
-	// lighter side terms let those columns lean and merge like real flames.
-	for row := range rows {
-		below := f.cells[(row+1)*cols:]
-		// Extra cooling over the topmost rows so the fire fades out instead
-		// of being sliced off at the grid boundary: row 0 has no neighbour
-		// above it, so whatever heat reaches it would render as a hard flat
-		// line. This is the mirror of the off-screen seed row.
-		fade := fireTopFade(row, rows)
-		out := f.cells[row*cols:]
-		for col := range cols {
-			left, right := col-1, col+1
-			if col == 0 {
-				left = cols - 1
+		row := (f.rows - 1 - age) * f.cols
+		for c := range f.cols {
+			v := src.BandAt((float64(c)+0.5)/float64(f.cols), false) * fireGain * f.fade[age]
+			if age == 0 {
+				v = max(v, fireEmber)
 			}
-			if right == cols {
-				right = 0
-			}
-			// Weights 6:1:1, dominated by straight-up rise.
-			avg := (below[col]*6 + below[left] + below[right]) / 8
-			// Random per-cell cooling. Uniform decay would let the small
-			// sideways term equalise each row over time; the jitter keeps
-			// neighbouring columns at genuinely different heights.
-			d := decay
-			if len(f.spec) == cols {
-				// Spectrum shaping: a column over a band above its norm cools
-				// slower, so its tongues climb higher (mirrored, bass centre).
-				d *= 1 - fireSpectrumCool*float32(f.spec[col])*2
-			}
-			jitter := 1 - d*(0.2+float32(f.rng.Float())*1.6)
-			out[col] = min(max(avg*jitter*fade, 0), 1)
+			f.heat[row+c] = v
 		}
 	}
 }
-
-// quantise maps heat to a ramp index for every visible cell.
-//
-// The mapping is DITHERED, and it has to be. In the sparse tail of the fire
-// the heat field is smooth and nearly flat, so a plain floor puts a whole
-// horizontal swathe of cells in the same bucket at once: long unbroken runs
-// of '.' that read as horizontal lines through the dying flames. A stable
-// per-cell offset before flooring breaks the tie, so cells either side of a
-// threshold scatter instead of flipping in unison.
-func (f *fire) quantise(t float32) {
-	n := float32(len(fireRamp))
-	blend := len(f.prev) == len(f.idx)
-	for i := range f.idx {
-		h := f.cells[i]
-		if blend {
-			h = f.prev[i] + (h-f.prev[i])*t
-		}
-		h = min(max(h, 0), 1)
-		// Dither by up to one bucket, centred so mean brightness is unchanged.
-		d := (f.dither[i] - 0.5) * fireDither
-		f.idx[i] = uint8(min(int(max(h*n+d, 0)), len(fireRamp)-1))
-	}
-}
-
-// glyphIndex is the dithered ramp index at a visible cell (tests).
-func (f *fire) glyphIndex(col, row int) int { return int(f.idx[row*f.cols+col]) }
-
-func (f *fire) heat(col, row int) float32 { return f.cells[row*f.cols+col] }
 
 func (f *fire) Cell(col, row int) (rune, RGB, bool) {
 	if col < 0 || row < 0 || col >= f.cols || row >= f.rows {
 		return 0, RGB{}, false
 	}
-	i := f.idx[row*f.cols+col]
-	if i == 0 {
+	h := min(max(f.heat[row*f.cols+col]*(1+fireKickHeat*f.kick), 0), 1)
+	// Rounded, not ceiled: the faint tail of a cooled row goes dark instead of
+	// dusting the whole panel with dots.
+	idx := min(int(h*float64(len(fireRamp)-1)+0.5), len(fireRamp)-1)
+	if idx <= 0 {
 		return 0, RGB{}, false
 	}
-	return fireRamp[i], f.colours[i], true
+	return fireRamp[idx], f.colours[int(h*float64(len(f.colours)-1)+0.5)], true
 }

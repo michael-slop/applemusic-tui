@@ -1,113 +1,65 @@
 package fx
 
-import "math"
-
-// "Flames": a faithful port of panefx's flames.rs, itself a port of
-// msimpson's gist (https://gist.github.com/msimpson/1096950).
+// "Flames": the spectrum as fire.
 //
-// This is a DIFFERENT algorithm from fire.go, not a retuning of it, and the
-// differences are the whole point:
+// The columns are the frequency axis, mirrored: bass burns in the centre and
+// the treble at both edges, so the picture is symmetric left to right. Each
+// column is one flame whose HEIGHT is the band beneath it -- a spectrum bar
+// drawn as fire:
 //
-//   - Heat is an INTEGER 0..65 and indexes the glyph table directly
-//     (char[min(b[i], 9)]). There is no float-to-bucket quantisation step,
-//     which is exactly where fire produced horizontal banding.
-//   - Seeding is SPARSE: only width/9 randomly chosen cells per frame are set
-//     hot, rather than the whole bottom row. That is what gives discrete
-//     rising sources instead of a solid sheet of flame.
-//   - The kernel is asymmetric: (self + right + below + below_right) / 4, with
-//     integer division doing all the cooling. There is no separate decay term.
-//   - The update is IN-PLACE over a flat array, so each cell reads
-//     already-updated neighbours. This is load-bearing: a double-buffered
-//     version of the same kernel looks different.
+//	height = rest + (top - rest) * level
 //
-// The original's colours are four curses pairs keyed to value thresholds
-// (>15, >9, >4, else), not one colour per glyph. panefx drew them as the
-// necronomicon's pale / green / teal / purple; here they are the theme's
-// AccentHi / Accent / AccentLo and a dim blend of the darkest ramp stop with
-// Dim, so the colour controller recolours the fire.
+// the same shape as the torus's tube radius 0.55+0.85*band. Inside a column
+// the glyph runs the gist's fire ramp (msimpson,
+// https://gist.github.com/msimpson/1096950: " .:^*xsS#$") from hot at the
+// base to cool at the tip, measured along THAT column's own height, so a
+// short flame and a tall one are each a whole flame. The colour climbs the
+// theme ramp the same way (p.At), so the colour controller recolours it.
 //
-// Timing: panefx stepped flames once per panel frame at its default 10 fps.
-// amtui steps at 30 fps, so the simulation runs on a 100 ms accumulator.
+// Texture: the tip of each flame is frayed by a noise pattern that is FIXED in
+// space (a constant hash of column and row, mirrored like the bands), so the
+// top edge reads as tongues of flame rather than bars. It never moves on its
+// own: a steady spectrum draws a steady picture. The only motion is the music.
 //
-// Cells: panefx drew on the terminal's own 10x15 text grid, close enough to a
-// terminal cell's 1:2 that the kernel needs no adaptation. The gist's seed
-// value of 65 reaches ~20 rows whatever the panel height; on amtui's shorter
-// visualizer panel that is most of the panel, which is the look.
+// Cells are ~1:2 (twice as tall as wide); heights are in rows, so each column
+// is a narrow flame and nothing needs correcting for the aspect.
 //
 // How it hears the music:
-//   - Kick (the beat pulse) raises the seed value, i.e. the flame height: each
-//     bass hit throws the fire up by up to +14, then it settles back to 65
-//     (+35 saturated the fire: two thirds of it at the hottest glyph).
-//   - Drive(Bass) raises the seeding density: a busy bass line lights up to
-//     40% more sources along the bottom row.
-//   - The spectrum shapes it: each column's seed heat follows the band beneath
-//     it (mirrored: bass in the middle, treble at both edges), so the fire is
-//     a burning spectrum, tallest where the music is loudest for this song.
-//   - Paused (Playing false) or reactivity 0: exactly the gist.
+//   - Band level (Audio.BandAt(col, mirrored)) is each column's flame height;
+//     a full band nearly reaches the top of the panel. Heights ease lightly
+//     toward the band (half the gap per frame) so the fire breathes rather
+//     than jitters; the bands are already smoothed upstream.
+//   - A louder band also burns hotter: brighter glyphs and colours at its base.
+//   - Kick is a global pulse: every flame jumps a little taller and the whole
+//     fire flashes hotter for the ~0.3 s the kick takes to decay.
+//   - Silence: React decays to 0, every flame sinks to the resting ember line
+//     along the bottom (about a tenth of the panel), and nothing moves.
 
 // flamesChars is the gist's ten-character ramp, coldest first.
 var flamesChars = [10]rune{' ', '.', ':', '^', '*', 'x', 's', 'S', '#', '$'}
 
 const (
-	// flamesSeedValue is written into a seeded cell; 65 is straight from the
-	// gist. It is effectively the FLAME HEIGHT control: the kernel's /4
-	// integer division cools aggressively, so the fire reaches only ~20 rows.
-	flamesSeedValue = 65
-	flamesDensity   = 9 // 1 in N bottom cells seeded per frame (gist: width/9)
-	// Colour thresholds from the original's color=(4 if b[i]>15 else ...).
-	flamesTHot  = 15
-	flamesTWarm = 9
-	flamesTCool = 4
-	// flamesTick is one simulation frame: panefx's default 10 fps.
-	flamesTick = 0.1
-	// Music: how far a full kick raises the seed value, and how much a full
-	// bass drive multiplies the number of sources.
-	flamesKickLift  = 14
-	flamesBassDense = 0.4
-	// Spectrum shaping: each column's seed heat follows the band beneath it,
-	// mirrored so the bass burns in the middle and the treble at both edges.
-	// The swing is in heat per panel row, so a band at +-0.5 moves its
-	// column's flame about +-30% of the panel height at any size.
-	flamesSpectrumPerRow = 1.9
-	// Resting heat per panel row (reaches ~half the panel), floored so a tiny
-	// panel still shows fire; capped by the gist's 65 from 42 rows up.
-	flamesRestPerRow = 1.55
-	flamesRestMin    = 12
+	flamesRest     = 0.10 // resting ember line, fraction of the panel height
+	flamesTop      = 0.95 // a full band's flame, fraction of the panel height
+	flamesEase     = 0.5  // fraction of the gap to the band closed per frame
+	flamesKickLift = 0.15 // a full kick makes every flame this much taller
+	flamesKickHeat = 0.30 // ...and this much hotter
+	flamesFray     = 0.22 // tip fraying, +- fraction of the flame's height
+	flamesFrayRows = 0.6  // ...plus this many rows, so short flames fray too
+	flamesColours  = 64   // colour table resolution
 )
 
 type flames struct {
 	width, height int
-	// Flat heat array. The gist allocates size + width + 1 so the kernel can
-	// read b[i+width+1] on the last row without bounds-checking; we keep that
-	// same slack for the same reason.
-	b   []int32
-	rng *Rand
-	acc float64
-	// prev is the visible heat before the latest simulation step and disp
-	// what is drawn: heat blended from prev to b by the fraction of the next
-	// 10 Hz tick already elapsed. The gist's simulation is untouched; the
-	// picture changes 30 times a second instead of 10.
-	prev []int32
-	disp []int32
-	// spec is this frame's spectrum deviation per column (0 at rest).
-	spec []float64
-
-	// The breath: how far the flame height swings either side of the seed
-	// value, and the seconds for one full breath. osc 0 (the default)
-	// disables it: the steady fire is the look panefx shipped with. Kept
-	// because it is part of the original's behaviour; amtui's music plays the
-	// same role live.
-	osc     int
-	oscSecs float64
-	// Frames elapsed, for the breath's phase. Counted rather than read off a
-	// clock so the sweep is deterministic under test.
-	tick uint64
-
-	cHot, cWarm, cCool, cDim RGB
+	hgt           []float64 // eased flame height per column, in rows
+	lvl           []float64 // eased band level per column, 0..1
+	noise         []float64 // fixed fray per cell, -0.5..0.5, index y*width+col, y = rows from bottom
+	kick          float64
+	colours       [flamesColours]RGB
 }
 
 func newFlames() Effect {
-	f := &flames{rng: NewRand(0xF1A3E5), oscSecs: 20}
+	f := &flames{}
 	f.Resize(0, 0)
 	return f
 }
@@ -116,156 +68,84 @@ func init() { Register("flames", 10, newFlames) }
 
 func (f *flames) Name() string { return "flames" }
 
+// flamesHash is a constant-seeded hash of a cell, in [0,1).
+func flamesHash(x, y int) float64 {
+	h := uint32(x)*0x9E3779B9 ^ uint32(y)*0x85EBCA6B ^ 0xF1A3E5
+	h ^= h >> 15
+	h *= 0x2545F491
+	h ^= h >> 13
+	h *= 0x68E31DA5
+	h ^= h >> 16
+	return float64(h>>8) / float64(1<<24)
+}
+
+// rest is the resting ember line's height in rows.
+func (f *flames) rest() float64 { return max(1, flamesRest*float64(f.height)) }
+
 func (f *flames) Resize(cols, rows int) {
 	cols, rows = max(cols, 0), max(rows, 0)
-	if cols == f.width && rows == f.height && f.b != nil {
+	if cols == f.width && rows == f.height && f.hgt != nil {
 		return
 	}
 	f.width, f.height = cols, rows
-	f.b = make([]int32, cols*rows+cols+1)
-	f.prev = make([]int32, cols*rows)
-	f.disp = make([]int32, cols*rows)
-	f.spec = make([]float64, cols)
+	f.hgt = make([]float64, cols)
+	f.lvl = make([]float64, cols)
+	for c := range f.hgt {
+		f.hgt[c] = f.rest()
+	}
+	f.noise = make([]float64, cols*rows)
+	for y := range rows {
+		for c := range cols {
+			// Mirrored like the bands, so the picture stays symmetric.
+			f.noise[y*cols+c] = flamesHash(min(c, cols-1-c), y) - 0.5
+		}
+	}
 }
 
 func (f *flames) SetPalette(p Palette) {
-	f.cHot = p.AccentHi
-	f.cWarm = p.Accent
-	f.cCool = p.AccentLo
-	// panefx's dim band is a deep purple under the teal; the theme's Dim
-	// pulled most of the way down to the darkest ramp stop plays that part.
-	f.cDim = Lerp(p.Ramp[0], p.Dim, 0.45)
-}
-
-// seedNow is the seed value for this frame, breathing if osc is set. A sine,
-// not a triangle: the fire should pause at the top and bottom of the breath
-// rather than reverse sharply. Clamped to 1..255 so a large osc flattens
-// against the ends instead of wrapping from tall to nothing in one frame.
-// restSeed is the seed heat for this panel. The gist's 65 makes a fire about
-// 21 rows tall whatever the panel (reach ~= seed/3.1 rows, measured), which is
-// a bottom band on panefx's 84-row terminal but fills amtui's 20-40 row panel
-// with no headroom left for the music. So a short panel rests at about half
-// its height; from 42 rows up it is the gist's 65 exactly.
-func (f *flames) restSeed() int32 {
-	seed := f.seedNow()
-	if cap := int32(math.Round(flamesRestPerRow * float64(f.height))); cap < seed {
-		seed = max(cap, flamesRestMin)
+	for i := range f.colours {
+		f.colours[i] = p.At(0.1 + 0.9*float64(i)/float64(len(f.colours)-1))
 	}
-	return seed
-}
-
-func (f *flames) seedNow() int32 {
-	if f.osc == 0 || f.oscSecs <= 0 {
-		return flamesSeedValue
-	}
-	period := max(f.oscSecs/flamesTick, 1)
-	phase := math.Mod(float64(f.tick), period) / period
-	s := math.Sin(phase * 2 * math.Pi)
-	return int32(min(max(flamesSeedValue+int(math.Round(s*float64(f.osc))), 1), 255))
 }
 
 func (f *flames) Step(a Audio) {
-	// Never try to catch up more than a second after a stall.
-	f.acc = min(f.acc+a.DT, 1)
-	var kick, bass float64
-	if a.Playing {
-		kick, bass = min(max(a.Kick, 0), 1), Drive(a.Bass)
-	}
-	n := f.width * f.height
-	if len(f.spec) == f.width {
-		a.SpectrumRow(f.spec, true)
-	}
-	for f.acc >= flamesTick {
-		f.acc -= flamesTick
-		if len(f.prev) == n {
-			copy(f.prev, f.b[:n])
-		}
-		f.advance(kick, bass)
-	}
-	f.blend(f.acc / flamesTick)
-}
-
-// blend fills disp with heat t of the way from prev to the current state.
-func (f *flames) blend(t float64) {
-	n := f.width * f.height
-	if len(f.disp) != n || len(f.prev) != n {
+	f.kick = min(max(a.Kick, 0), 1)
+	if f.width == 0 {
 		return
 	}
-	for i := range n {
-		p, c := float64(f.prev[i]), float64(f.b[i])
-		f.disp[i] = int32(math.Round(p + (c-p)*t))
+	rest := f.rest()
+	top := max(rest, flamesTop*float64(f.height))
+	for c := range f.hgt {
+		lvl := min(max(a.BandAt((float64(c)+0.5)/float64(f.width), true), 0), 1)
+		target := (rest + (top-rest)*lvl) * (1 + flamesKickLift*f.kick)
+		f.hgt[c] = flamesEaseTo(f.hgt[c], target)
+		f.lvl[c] = flamesEaseTo(f.lvl[c], lvl)
 	}
 }
 
-// advance is one frame of the gist.
-func (f *flames) advance(kick, bass float64) {
-	if f.width == 0 || f.height == 0 {
-		return
+// flamesEaseTo closes part of the gap per frame, snapping once it is closed
+// so a steady spectrum settles on exactly steady values.
+func flamesEaseTo(v, target float64) float64 {
+	v += (target - v) * flamesEase
+	if d := target - v; d < 1e-6 && d > -1e-6 {
+		return target
 	}
-	w := f.width
-	size := w * f.height
-
-	// for i in range(int(width/9)): b[int(random.random()*width + width*(height-1))] = 65
-	// Sparse seeding along the bottom row, only ~1 cell in 9.
-	seeds := w / flamesDensity
-	if bass > 0 {
-		seeds = int(float64(seeds) * (1 + flamesBassDense*bass))
-	}
-	base := w * (f.height - 1)
-	// One value for the whole row: seeding a single frame at two different
-	// heights would fray the base of the fire rather than raise it.
-	seed := f.restSeed()
-	if kick > 0 {
-		seed = min(seed+int32(math.Round(flamesKickLift*kick)), 255)
-	}
-	for range seeds {
-		off := min(int(f.rng.Float()*float64(w)), w-1)
-		v := seed
-		if len(f.spec) == w && f.spec[off] != 0 {
-			// Heat per row of reach is ~3.1, so this swings the column by
-			// about +-30% of the panel height at a band's extremes.
-			lift := flamesSpectrumPerRow * float64(f.height) * f.spec[off]
-			v = min(max(seed+int32(math.Round(lift)), 0), 255)
-		}
-		f.b[base+off] = v
-	}
-	// Advance the breath AFTER seeding, so frame 0 uses the configured height.
-	f.tick++
-
-	// b[i] = int((b[i] + b[i+1] + b[i+width] + b[i+width+1]) / 4)
-	// In-place and forward-walking, so later cells see updated earlier ones.
-	// Integer division is the only cooling in the algorithm.
-	b := f.b
-	for i := 0; i < size; i++ {
-		b[i] = (b[i] + b[i+1] + b[i+w] + b[i+w+1]) / 4
-	}
-	f.blend(1) // until Step blends, show exactly this simulation state
+	return v
 }
 
 func (f *flames) Cell(col, row int) (rune, RGB, bool) {
 	if col < 0 || row < 0 || col >= f.width || row >= f.height {
 		return 0, RGB{}, false
 	}
-	v := f.b[row*f.width+col]
-	if len(f.disp) == f.width*f.height {
-		v = f.disp[row*f.width+col]
-	}
-	// char[(9 if b[i]>9 else b[i])]
-	idx := min(max(v, 0), 9)
-	if idx == 0 {
-		// Blank cells are skipped, not painted.
+	y := f.height - 1 - row // rows from the bottom
+	h := f.hgt[col]
+	h += f.noise[y*f.width+col] * (flamesFray*h + flamesFrayRows)
+	frac := (float64(y) + 0.5) / max(h, 0.01)
+	if frac >= 1 {
 		return 0, RGB{}, false
 	}
-	var c RGB
-	switch {
-	case v > flamesTHot:
-		c = f.cHot
-	case v > flamesTWarm:
-		c = f.cWarm
-	case v > flamesTCool:
-		c = f.cCool
-	default:
-		c = f.cDim
-	}
-	return flamesChars[idx], c, true
+	heat := (1 - frac) * (0.6 + 0.4*f.lvl[col]) * (1 + flamesKickHeat*f.kick)
+	heat = min(max(heat, 0), 1)
+	idx := min(max(int(heat*9+0.999), 1), 9)
+	return flamesChars[idx], f.colours[int(heat*float64(len(f.colours)-1)+0.5)], true
 }
