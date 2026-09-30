@@ -23,6 +23,13 @@ package fx
 // Everything is rasterised in Step into a glyph/colour grid; Cell is a
 // lookup.
 //
+// plasma-square is the same effect filling the whole panel. Both axes are
+// folded about the centre the way Spectrum folds one (u = |2x-1|, v = |2y-1|),
+// so all four quadrants are mirror images, and the folded pair becomes a
+// radius through a rounded square (a superellipse, scaled so the corners reach
+// the rim): bass at the centre, treble in the corners, no blank cells. The
+// texture angle is folded too, so the slow spin turns as a kaleidoscope.
+//
 // How it hears the music: each ring glows with its band's reactive level
 // (React, slider-scaled; 0.5 = normal for this song). A kick breathes the disc
 // outward -- every ring is pushed out by up to 18%, like the sphere's latitudes
@@ -47,6 +54,7 @@ const (
 )
 
 type plasma struct {
+	square     bool // plasma-square: quadrant-folded rounded-square rings
 	cols, rows int
 	theta      float64 // texture rotation, wrapped to 0..2π
 
@@ -61,9 +69,19 @@ type plasma struct {
 
 func newPlasma() Effect { return &plasma{} }
 
-func init() { Register("plasma", 30, newPlasma) }
+func newPlasmaSquare() Effect { return &plasma{square: true} }
 
-func (p *plasma) Name() string { return "plasma" }
+func init() {
+	Register("plasma", 30, newPlasma)
+	Register("plasma-square", 30, newPlasmaSquare)
+}
+
+func (p *plasma) Name() string {
+	if p.square {
+		return "plasma-square"
+	}
+	return "plasma"
+}
 
 // FreeMotion: the texture turns rigidly even on a steady spectrum.
 func (p *plasma) FreeMotion() string { return "spin" }
@@ -88,10 +106,22 @@ func (p *plasma) Resize(cols, rows int) {
 			i := row*cols + col
 			dx := float64(col) + 0.5 - cx
 			dy := (float64(row) + 0.5 - cy) * 2 // cells are ~1:2
+			if p.square {
+				p.rad[i] = plasmaSquareRadius(math.Abs(dx)/cx, math.Abs(dy)/(2*cy))
+				p.ang[i] = math.Atan2(math.Abs(dy), math.Abs(dx))
+				continue
+			}
 			p.rad[i] = math.Hypot(dx, dy) / rmax
 			p.ang[i] = math.Atan2(dy, dx)
 		}
 	}
+}
+
+// plasmaSquareRadius maps folded offsets u, v (0 at the centre, 1 at the
+// panel's edges) to plasma-square's radius: 0 at the centre, 1 in the corners,
+// 2^-1/4 (~0.84) at the middle of each edge.
+func plasmaSquareRadius(u, v float64) float64 {
+	return math.Sqrt(math.Sqrt(u*u*u*u+v*v*v*v)) / math.Sqrt(math.Sqrt(2))
 }
 
 // texture is the plasma field in polar form at radius r and angle phi, 0..1.

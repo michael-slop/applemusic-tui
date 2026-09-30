@@ -116,3 +116,97 @@ func TestPlasmaStepDoesNotAllocate(t *testing.T) {
 		t.Fatalf("Step allocated %v times", n)
 	}
 }
+
+func builtPlasmaSquare(cols, rows int) *plasma {
+	p := newPlasmaSquare().(*plasma)
+	p.SetPalette(testPalette)
+	p.Resize(cols, rows)
+	return p
+}
+
+func TestPlasmaSquareQuadrantsMirror(t *testing.T) {
+	for _, size := range [][2]int{{60, 20}, {61, 21}, {7, 3}} {
+		w, h := size[0], size[1]
+		p := builtPlasmaSquare(w, h)
+		a := ptsBands(0.3, 4, 12, 0.9)
+		a.React[27] = 1
+		a.Kick = 0.6
+		for range 40 { // turn the texture well away from its start
+			p.Step(a)
+		}
+		for r := range h {
+			for c := range w {
+				ch, col, ok := p.Cell(c, r)
+				for _, m := range [][2]int{{w - 1 - c, r}, {c, h - 1 - r}, {w - 1 - c, h - 1 - r}} {
+					mch, mcol, mok := p.Cell(m[0], m[1])
+					if mch != ch || mcol != col || mok != ok {
+						t.Fatalf("%dx%d: cell (%d,%d) differs from its mirror (%d,%d)", w, h, c, r, m[0], m[1])
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestPlasmaSquareFillsThePanelTheCircleDoesNot(t *testing.T) {
+	const w, h = 60, 20
+	loud := ptsBands(1, 0, 0, 1)
+	sq, disc := builtPlasmaSquare(w, h), builtPlasma(w, h)
+	sq.Step(loud)
+	disc.Step(loud)
+	for r := range h {
+		for c := range w {
+			if _, _, ok := sq.Cell(c, r); !ok {
+				t.Fatalf("plasma-square left (%d,%d) blank with every band loud", c, r)
+			}
+		}
+	}
+	for _, c := range [][2]int{{0, 0}, {w - 1, 0}, {0, h - 1}, {w - 1, h - 1}} {
+		if _, _, ok := disc.Cell(c[0], c[1]); ok {
+			t.Fatalf("circular plasma drew corner %v; it should stay round", c)
+		}
+	}
+}
+
+func TestPlasmaSquareBassCentreTrebleCorners(t *testing.T) {
+	const w, h = 60, 20
+	p := builtPlasmaSquare(w, h)
+	centre := func(c, r int) bool { return p.rad[r*w+c] < 0.2 }
+	corners := func(c, r int) bool { return p.rad[r*w+c] > 0.9 }
+
+	// Per-cell means: the corner region is far smaller than the centre, so
+	// sums would compare areas, not brightness.
+	mean := func(in func(c, r int) bool) float64 {
+		n := 0
+		for r := range h {
+			for c := range w {
+				if in(c, r) {
+					n++
+				}
+			}
+		}
+		return ptsWeightWhere(p, w, h, in) / float64(n)
+	}
+	p.Step(ptsBands(0, 0, 5, 1))
+	bc, bk := mean(centre), mean(corners)
+	if bc == 0 || bk > bc*0.1 {
+		t.Fatalf("a bass spike should light the centre, not the corners: centre %.3f corners %.3f", bc, bk)
+	}
+	p.Step(ptsBands(0, 26, 31, 1))
+	tc, tk := mean(centre), mean(corners)
+	if tk == 0 || tk <= tc*1.5 {
+		t.Fatalf("a treble spike should light the corners well above the centre: centre %.3f corners %.3f", tc, tk)
+	}
+}
+
+func TestPlasmaSquareRadiusRunsCentreToCorner(t *testing.T) {
+	if r := plasmaSquareRadius(0, 0); r != 0 {
+		t.Fatalf("centre radius = %v, want 0", r)
+	}
+	if r := plasmaSquareRadius(1, 1); r < 0.999999 || r > 1.000001 {
+		t.Fatalf("corner radius = %v, want 1", r)
+	}
+	if a, b := plasmaSquareRadius(1, 0), plasmaSquareRadius(0, 1); a != b || a > 0.85 || a < 0.83 {
+		t.Fatalf("edge-middle radii = %v, %v, want equal ~0.84", a, b)
+	}
+}
