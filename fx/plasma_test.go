@@ -1,9 +1,6 @@
 package fx
 
-import (
-	"math"
-	"testing"
-)
+import "testing"
 
 func builtPlasma(cols, rows int) *plasma {
 	p := newPlasma().(*plasma)
@@ -12,99 +9,110 @@ func builtPlasma(cols, rows int) *plasma {
 	return p
 }
 
-func ptsLit(e Effect, cols, rows int) int {
-	n := 0
+// ptsBands is a playing frame with every band at base and bands lo..hi at v.
+func ptsBands(base float64, lo, hi int, v float64) Audio {
+	a := silence()
+	a.Playing = true
+	for i := range a.React {
+		a.React[i] = base
+		if i >= lo && i <= hi {
+			a.React[i] = v
+		}
+	}
+	return a
+}
+
+// ptsWeightWhere sums the drawn brightness of the cells for which in is true.
+func ptsWeightWhere(e Effect, cols, rows int, in func(c, r int) bool) float64 {
+	var s float64
 	for r := range rows {
 		for c := range cols {
-			if _, _, ok := e.Cell(c, r); ok {
-				n++
+			if !in(c, r) {
+				continue
+			}
+			if _, col, ok := e.Cell(c, r); ok {
+				s += (0.2126*float64(col.R) + 0.7152*float64(col.G) + 0.0722*float64(col.B)) / 255
 			}
 		}
 	}
-	return n
+	return s
 }
 
-func TestPlasmaFieldStaysNormalised(t *testing.T) {
-	// The ramp index is derived from this, so a value outside 0..1 either
-	// panics on the index or flattens the whole effect to one end.
+func TestPlasmaBassLightsTheCentreTrebleTheRim(t *testing.T) {
+	const w, h = 60, 20
+	p := builtPlasma(w, h)
+	centre := func(c, r int) bool { return p.rad[r*w+c] < 0.2 }
+	rim := func(c, r int) bool { return p.rad[r*w+c] > 0.8 && p.rad[r*w+c] < 1 }
+
+	p.Step(ptsBands(0, 0, 5, 1))
+	bc, br := ptsWeightWhere(p, w, h, centre), ptsWeightWhere(p, w, h, rim)
+	if bc == 0 || br > bc*0.1 {
+		t.Fatalf("a bass spike should light the centre, not the rim: centre %.1f rim %.1f", bc, br)
+	}
+	p.Step(ptsBands(0, 26, 31, 1))
+	tc, tr := ptsWeightWhere(p, w, h, centre), ptsWeightWhere(p, w, h, rim)
+	if tr == 0 || tr <= tc {
+		t.Fatalf("a treble spike should light the rim more than the centre: centre %.1f rim %.1f", tc, tr)
+	}
+	// The centre keeps only the faint resting disc: its sparsest glyph.
+	for r := range h {
+		for c := range w {
+			if ch, _, ok := p.Cell(c, r); ok && centre(c, r) && ch != plasmaRamp[1] {
+				t.Fatalf("a treble spike lit the centre with %q", ch)
+			}
+		}
+	}
+}
+
+func TestPlasmaRingsAreRound(t *testing.T) {
+	// Cells are ~1:2, so a ring's horizontal radius in cells is twice its
+	// vertical one.
 	p := builtPlasma(80, 40)
-	for i := range 40 {
-		p.Step(loud(i))
-		for r := range p.rows {
-			for c := range p.cols {
-				if v := p.field(c, r); v < 0 || v > 1 {
-					t.Fatalf("field out of range: %v", v)
-				}
-			}
-		}
+	if got := p.rad[20*80+40+20]; got < 0.45 || got > 0.55 {
+		t.Fatalf("20 cells right of centre is at radius %.2f, want ~0.5", got)
+	}
+	if got := p.rad[(20+10)*80+40]; got < 0.45 || got > 0.55 {
+		t.Fatalf("10 rows below centre is at radius %.2f, want ~0.5", got)
 	}
 }
 
-func TestPlasmaIsPacedByTimeNotFrameCount(t *testing.T) {
-	fast, slow := builtPlasma(20, 10), builtPlasma(20, 10)
-	a := silence()
-	a.DT = 0.02
-	for range 50 {
-		fast.Step(a)
-	}
-	a.DT = 0.1
-	for range 10 {
-		slow.Step(a)
-	}
-	if math.Abs(fast.t-slow.t) > 1e-9 {
-		t.Fatalf("%v != %v", fast.t, slow.t)
-	}
-	// panefx's rate: 0.08 of a cycle per second at speed 1.
-	if math.Abs(fast.t-0.08) > 1e-9 {
-		t.Fatalf("one second advanced the phase by %v, want 0.08", fast.t)
-	}
-}
-
-func TestPlasmaFeatureSizeDoesNotStretchWithThePanel(t *testing.T) {
-	// Both axes are normalised by the SHORT one, so a feature is the same
-	// number of cells across whatever the panel shape. Measured as the mean
-	// distance between zero crossings along a row.
-	period := func(p *plasma, row int) int {
-		var xs []int
-		prev := p.field(0, row) - 0.5
-		for c := 1; c < p.cols; c++ {
-			cur := p.field(c, row) - 0.5
-			if (prev < 0) != (cur < 0) {
-				xs = append(xs, c)
-			}
-			prev = cur
-		}
-		if len(xs) < 2 {
-			return 0
-		}
-		return (xs[len(xs)-1] - xs[0]) / (len(xs) - 1)
-	}
-	a, b := period(builtPlasma(200, 60), 30), period(builtPlasma(60, 60), 30)
-	if a == 0 || b == 0 {
-		t.Fatalf("no crossings: %d, %d", a, b)
-	}
-	if float64(max(a, b))/float64(min(a, b)) >= 2 {
-		t.Fatalf("feature size stretched with the panel: %d vs %d", a, b)
-	}
-}
-
-func TestPlasmaLeavesTheDarkHalfEmpty(t *testing.T) {
+func TestPlasmaSilenceIsAFaintRestingDisc(t *testing.T) {
 	p := builtPlasma(60, 20)
-	p.Step(silence())
-	if lit := ptsLit(p, 60, 20); lit == 0 || lit == 60*20 {
-		t.Fatalf("%d of %d cells lit; the dark cut is not working", lit, 60*20)
+	a := silence()
+	for i := range a.React {
+		a.React[i] = 0
+	}
+	p.Step(a)
+	lit := ptsLit(p, 60, 20)
+	if lit == 0 || lit > 60*20/4 {
+		t.Fatalf("silence lit %d of %d cells, want a small disc", lit, 60*20)
+	}
+	for r := range 20 {
+		for c := range 60 {
+			if ch, _, ok := p.Cell(c, r); ok && p.rad[r*60+c] >= plasmaRestR {
+				t.Fatalf("silence drew %q outside the resting disc", ch)
+			}
+		}
 	}
 }
 
-func TestPlasmaKickLightsMoreOfTheField(t *testing.T) {
+func TestPlasmaKickBreathesOutward(t *testing.T) {
 	calm, hit := builtPlasma(60, 20), builtPlasma(60, 20)
 	for range 10 {
-		a := loud(1) // odd frame: no kick
+		a := ptsBands(0, 0, 10, 1)
 		calm.Step(a)
 		a.Kick = 1
 		hit.Step(a)
 	}
 	if h, c := ptsLit(hit, 60, 20), ptsLit(calm, 60, 20); h <= c {
-		t.Fatalf("a kick should light more of the field: %d !> %d", h, c)
+		t.Fatalf("a kick should push the lit core outward: %d !> %d", h, c)
+	}
+}
+
+func TestPlasmaStepDoesNotAllocate(t *testing.T) {
+	p := builtPlasma(80, 24)
+	a := loud(3)
+	if n := testing.AllocsPerRun(20, func() { p.Step(a) }); n != 0 {
+		t.Fatalf("Step allocated %v times", n)
 	}
 }

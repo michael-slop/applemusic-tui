@@ -1,35 +1,45 @@
 package fx
 
-// Rotating 3D solids with a z-buffer, ported from panefx's spin3d.rs. panefx's
-// module also drew the donut and the sphere; amtui already has its own torus
-// and sphere visualizers, so only the cube is ported here (the galaxy was dropped 2026-09-29).
+// Cube: a spinning box whose six faces bulge with the spectrum. The render is
+// panefx's spin3d.rs (Andy Sloane's donut.c method); the shape is the
+// spectrum, built on the torus blueprint (see the package doc).
 //
-// The method is Andy Sloane's donut.c (2006), which panefx reimplemented:
+// Faces are the axis. The 32 bands are split into six groups and each group
+// owns one face; the face sits out from the centre by
 //
-//   - walk the surface by two parameters, which gives points AND surface
-//     normals for free;
-//   - rotate by two more angles that advance with time;
-//   - project with 1/z, and keep 1/z as the depth key: larger is nearer, so
-//     the test is a single > and there is no division in the inner loop;
-//   - shade by the dot product of the normal with a fixed light direction,
-//     and index a ramp with it.
+//	base x (0.55 + 0.85 x groupLevel)
 //
-// A z-buffer is what makes it a solid rather than a wireframe: the far side
-// is computed, then rejected because the near side already claimed the cells.
-// The shape only swaps the parametric surface; the machinery (rotate,
-// project, depth-test, shade) is shared, which is why the shapes share a
-// module. Everything is rasterized in Step, so Cell is a table lookup.
+// exactly like the torus's tube radius, so the solid is a box with six
+// independent half-extents. Bass owns the floor, treble the lid and the mids
+// the four sides:
+//
+//	0-4 bottom   5-9 right   10-15 front   16-21 left   22-26 back   27-31 top
+//
+// Every face is also shaded by its group's level (a quiet group's face is
+// dim), so the spectrum shows as brightness as well as shape from any angle.
+//
+// The method: each face is a flat rectangle, so it is rotated once per frame
+// as a corner plus two edge vectors and then walked on an n x n grid; every
+// sample is projected with 1/z and depth-tested on 1/z (larger is nearer, one
+// compare, no division). Faces turned away from the viewer are skipped whole
+// (a box is convex). Shading is the dot of the face normal with a fixed light.
+// All of it is rasterised in Step into a reused buffer; Cell is a lookup.
+//
+// The only free motion is rigid: the box turns on a turntable (yaw) seen from
+// slightly above, with a slow nod of the tilt, like the torus's spin and
+// wobble. Seen from above, the lid always shows, and the turntable keeps the
+// silhouette's size steady.
 //
 // Cell aspect: x is projected at twice the scale of y, and the fit is to
 // min(cols, 2*rows), because a terminal cell is about twice as tall as it is
-// wide. panefx used the same 2:1, so the solids stay square/round here.
+// wide, so the box stays square.
 //
-// How it hears the music: a kick kicks the spin. Each kick sets a rotation
-// impulse that decays over ~0.6 s and multiplies both spin rates by up to
-// 3.5x, so the solid lurches round on the beat and coasts back to cruising
-// speed. The bass (Drive(a.Bass), smoothed) swells the object by up to 18%,
-// and the kick briefly lifts the shading a step or two up the ramp. Paused or
-// at reactivity 0 it turns exactly like the original.
+// How it hears the music: each face's distance and brightness follow its band
+// group's reactive level (React, slider-scaled; 0.5 = normal for this song).
+// A kick kicks the spin -- an impulse that multiplies the turn rate by up to
+// 3.5x and coasts down over ~0.6 s -- breathes the whole box up to 12% bigger
+// and lifts the shading a step or two up the ramp. In silence React decays to
+// 0 and the box settles to a small, dim resting cube that only turns.
 
 import "math"
 
@@ -39,28 +49,32 @@ var spinRamp = [12]rune{'.', ',', '-', '~', ':', ';', '=', '!', '*', '#', '$', '
 // spinEmpty marks a cell no surface claimed.
 const spinEmpty = math.MaxUint8
 
-type spinShape int
-
 const (
-	spinCube spinShape = iota
+	cubeBase   = 1.3  // a face's distance at band level 0.5 is ~0.98 of this
+	cubeRest   = 0.55 // torus: tube radius factor at silence
+	cubeSwell  = 0.85 // torus: extra radius per unit band level
+	cubeBreath = 0.12 // how much bigger a full kick makes the box
+	cubeTilt   = 0.5  // how far above the box the viewer sits, rad
+	cubeNod    = 0.15 // how much the tilt nods, rad
+	cubeDist   = 7.0  // camera distance: the near face never reaches the viewer
 )
 
-type spinSample struct{ p, n [3]float64 }
+// cubeGroups are the six band groups, in face order (see cubeFaces).
+var cubeGroups = [6][2]int{{0, 4}, {5, 9}, {10, 15}, {16, 21}, {22, 26}, {27, 31}}
+
+// cubeFaces are the faces' outward normals in model space (y up), in group
+// order: bottom (bass), right, front, left, back, top (treble).
+var cubeFaces = [6][3]float64{{0, -1, 0}, {1, 0, 0}, {0, 0, -1}, {-1, 0, 0}, {0, 0, 1}, {0, 1, 0}}
 
 type spin3d struct {
 	name       string
-	shape      spinShape
 	cols, rows int
 
-	a, b         float64 // the two rotation angles
-	spinA, spinB float64 // rad/s about each axis; signed
+	a, b         float64 // yaw and nod phases
+	spinA, spinB float64 // rad/s of each; signed
 	scale        float64 // object scale
-	density      float64 // surface sampling density; higher = smoother, dearer
 
-	// The surface, sampled once per (shape, sample count): the point and
-	// normal at each (u, v) never change, only their rotation does.
-	surf   []spinSample
-	surfNU int
+	group [6]float64 // this frame's band level per face
 
 	// Depth key per cell (1/z; larger is nearer) and ramp index per cell,
 	// spinEmpty for none. Reused every frame.
@@ -70,24 +84,26 @@ type spin3d struct {
 	lut [len(spinRamp)]RGB
 
 	// Music.
-	impulse, bass, kick float64
+	impulse, kick float64
 }
 
-func newSpin3d(name string, shape spinShape) func() Effect {
+func newSpin3d(name string) func() Effect {
 	return func() Effect {
-		return &spin3d{name: name, shape: shape, spinA: 1, spinB: 0.5, scale: 1, density: 1}
+		return &spin3d{name: name, spinA: 1, spinB: 0.5, scale: 1}
 	}
 }
 
 func init() {
-	Register("cube", 40, newSpin3d("cube", spinCube))
+	Register("cube", 40, newSpin3d("cube"))
 }
 
 func (s *spin3d) Name() string { return s.name }
 
-// SetPalette: panefx mixed a dark shadow colour to a bright lit colour by the
-// ramp index. The shadow end starts a little above the theme's darkest stop so
-// faces turned away from the light still read against the background.
+// FreeMotion: the box turns rigidly even on a steady spectrum.
+func (s *spin3d) FreeMotion() string { return "spin" }
+
+// SetPalette: the shadow end starts a little above the theme's darkest stop so
+// dim faces still read against the background.
 func (s *spin3d) SetPalette(p Palette) {
 	for i := range s.lut {
 		s.lut[i] = p.At(0.1 + 0.9*float64(i)/float64(len(s.lut)-1))
@@ -107,86 +123,38 @@ func (s *spin3d) Resize(cols, rows int) {
 	}
 }
 
-// steps is how many samples to take along each parameter, scaled to the
-// panel: a big panel needs more points to look solid, a small one should not
-// pay for them.
+// faceOffset is the torus rule: how far a face sits from the centre at band
+// level g.
+func faceOffset(g float64) float64 { return cubeBase * (cubeRest + cubeSwell*g) }
+
+// steps is how many samples to take along each edge of a face, scaled to the
+// panel: enough that the nearest, biggest face shows no holes.
 func (s *spin3d) steps() int {
-	d := min(max(s.density, 0.1), 4)
-	return min(max(int(float64(max(s.cols, s.rows))*0.9*d), 24), 720)
-}
-
-// pointAt is the surface point and normal at parameters (u, v), each in
-// 0..2π. Returning the normal alongside the point is what makes shading
-// cheap: for every surface here it is available analytically.
-func (s *spin3d) pointAt(u, v float64) (p, n [3]float64) {
-	const tau = 2 * math.Pi
-	switch s.shape {
-	default:
-		// Six faces, chosen by where v falls; u walks one axis and v's
-		// fraction the other. A cube has no smooth parameterisation, so this
-		// is a deliberate patchwork.
-		fv := v / tau * 6
-		face := int(fv) % 6
-		a := (u/tau*2 - 1) * 1.6
-		b := ((fv-math.Floor(fv))*2 - 1) * 1.6
-		switch face {
-		case 0:
-			return [3]float64{1.6, a, b}, [3]float64{1, 0, 0}
-		case 1:
-			return [3]float64{-1.6, a, b}, [3]float64{-1, 0, 0}
-		case 2:
-			return [3]float64{a, 1.6, b}, [3]float64{0, 1, 0}
-		case 3:
-			return [3]float64{a, -1.6, b}, [3]float64{0, -1, 0}
-		case 4:
-			return [3]float64{a, b, 1.6}, [3]float64{0, 0, 1}
-		default:
-			return [3]float64{a, b, -1.6}, [3]float64{0, 0, -1}
-		}
-	}
-}
-
-// sampleSurface refreshes the cached surface if the sample count changed.
-func (s *spin3d) sampleSurface() {
-	nu := s.steps()
-	if nu == s.surfNU && s.surf != nil {
-		return
-	}
-	s.surfNU = nu
-	nv := nu
-	if s.shape == spinCube {
-		// Deviation from panefx: the cube's v parameter is split six ways
-		// (one slice per face), so each face got only n/6 samples across it
-		// and the near face rendered with holes the back face showed through.
-		// Four times the v samples gives every face ~2n/3 each way.
-		nv = nu * 4
-	}
-	s.surf = s.surf[:0]
-	du, dv := 2*math.Pi/float64(nu), 2*math.Pi/float64(nv)
-	for j := range nv {
-		v := float64(j) * dv
-		for i := range nu {
-			p, nrm := s.pointAt(float64(i)*du, v)
-			s.surf = append(s.surf, spinSample{p, nrm})
-		}
-	}
+	return min(max(int(float64(min(s.cols, 2*s.rows))*1.2), 8), 900)
 }
 
 func (s *spin3d) Step(a Audio) {
 	dt := ptsDT(a)
-	var bass, kick float64
+	var kick float64
 	if a.Playing {
-		bass, kick = Drive(a.Bass), a.Kick
+		kick = a.Kick
 	}
 	// The impulse jumps with the kick and coasts down over ~0.6 s, longer
-	// than the kick itself, so the solid carries its momentum.
+	// than the kick itself, so the box carries its momentum.
 	s.impulse = max(s.impulse*math.Exp(-dt/0.6), kick)
-	s.bass = ptsGlide(s.bass, bass, dt, 0.2)
 	s.kick = ptsGlide(s.kick, kick, dt, 0.05)
 
 	boost := 1 + 2.5*s.impulse
 	s.a = math.Mod(s.a+dt*s.spinA*boost, 2*math.Pi)
 	s.b = math.Mod(s.b+dt*s.spinB*boost, 2*math.Pi)
+
+	for f, g := range cubeGroups {
+		var sum float64
+		for i := g[0]; i <= g[1]; i++ {
+			sum += min(max(a.React[i], 0), 1)
+		}
+		s.group[f] = sum / float64(g[1]-g[0]+1)
+	}
 
 	if s.cols == 0 || s.rows == 0 {
 		return
@@ -195,60 +163,92 @@ func (s *spin3d) Step(a Audio) {
 	for i := range s.lum {
 		s.lum[i] = spinEmpty
 	}
-	s.sampleSurface()
 
-	sa, ca := math.Sincos(s.a)
-	sb, cb := math.Sincos(s.b)
-	// Light from up and behind the viewer's shoulder, normalised.
-	light := [3]float64{0, 0.7071, -0.7071}
+	sy, cy0 := math.Sincos(s.a)
+	st, ct := math.Sincos(-(cubeTilt + cubeNod*math.Sin(s.b)))
+	// Yaw about y, then tilt about x (model y up, viewer at z = -cubeDist).
+	rot := func(x, y, z float64) (float64, float64, float64) {
+		x1 := x*cy0 + z*sy
+		z1 := -x*sy + z*cy0
+		return x1, y*ct - z1*st, y*st + z1*ct
+	}
+	// Light from up, left and behind the viewer's shoulder, normalised.
+	const lx, ly, lz = -0.4, 0.75, -0.53
+	ln := math.Sqrt(lx*lx + ly*ly + lz*lz)
 
-	scale := max(s.scale, 0.05) * (1 + 0.18*s.bass)
-	// Fit to the SHORT axis, counting a cell as half as wide as it is tall,
-	// so the solid stays on-screen and undistorted at any panel shape.
-	k := float64(max(min(s.cols, s.rows*2), 1)) * 0.32 * scale
+	scale := max(s.scale, 0.05) * (1 + cubeBreath*s.kick)
+	var e [6]float64 // half-extent per face
+	for f := range e {
+		e[f] = faceOffset(s.group[f]) * scale
+	}
+	// The box: x in [-left, right], y in [-bottom, top], z in [-front, back].
+	lo := [3]float64{-e[3], -e[0], -e[2]}
+	hi := [3]float64{e[1], e[5], e[4]}
+
+	k := float64(max(min(s.cols, s.rows*2), 1)) * 0.46
 	cx, cy := float64(s.cols)/2, float64(s.rows)/2
-	// Camera distance: big enough that the near face never crosses the
-	// viewer, which would invert the projection.
-	const kd = 7.0
+	fc, fr := float64(s.cols), float64(s.rows)
 	top := float64(len(spinRamp) - 1)
 	lift := 2 * s.kick
-	fc, fr := float64(s.cols), float64(s.rows)
+	n := s.steps()
 
-	// Rotate about x by a, then about z by b.
-	rot := func(q [3]float64) (x, y, z float64) {
-		y1 := q[1]*ca - q[2]*sa
-		z1 := q[1]*sa + q[2]*ca
-		return q[0]*cb - y1*sb, q[0]*sb + y1*cb, z1
-	}
+	for f, nm := range cubeFaces {
+		// The face's fixed axis and its two free ones.
+		ax := 0
+		switch {
+		case nm[1] != 0:
+			ax = 1
+		case nm[2] != 0:
+			ax = 2
+		}
+		u, v := (ax+1)%3, (ax+2)%3
+		var o, du, dv [3]float64
+		if nm[ax] > 0 {
+			o[ax] = hi[ax]
+		} else {
+			o[ax] = lo[ax]
+		}
+		o[u], o[v] = lo[u], lo[v]
+		du[u] = hi[u] - lo[u]
+		dv[v] = hi[v] - lo[v]
 
-	for i := range s.surf {
-		px, py, pz := rot(s.surf[i].p)
-		z := pz + kd
-		if z <= 0.1 {
+		ox, oy, oz := rot(o[0], o[1], o[2])
+		ux, uy, uz := rot(du[0], du[1], du[2])
+		vx, vy, vz := rot(dv[0], dv[1], dv[2])
+		nx, ny, nz := rot(nm[0], nm[1], nm[2])
+		// Back-face cull against the face centre (perspective-correct).
+		mx, my, mz := ox+(ux+vx)/2, oy+(uy+vy)/2, oz+(uz+vz)/2+cubeDist
+		if nx*mx+ny*my+nz*mz >= 0 {
 			continue
 		}
-		ooz := 1 / z
-		sx := cx + k*ooz*px*2 // doubled: cells are twice as tall as wide
-		sy := cy + k*ooz*py
-		if sx < 0 || sy < 0 || sx >= fc || sy >= fr {
-			continue
+		l := max((nx*lx+ny*ly+nz*lz)/ln, 0)
+		// Brightness is the face's band first, the light second.
+		shade := (0.3 + 0.7*l) * (0.25 + 0.75*s.group[f])
+		li := uint8(min(shade*top+lift, top))
+
+		for j := 0; j <= n; j++ {
+			tv := float64(j) / float64(n)
+			bx, by, bz := ox+vx*tv, oy+vy*tv, oz+vz*tv+cubeDist
+			for i := 0; i <= n; i++ {
+				tu := float64(i) / float64(n)
+				z := bz + uz*tu
+				if z <= 0.1 {
+					continue
+				}
+				ooz := 1 / z
+				px := cx + k*ooz*(bx+ux*tu)*2 // doubled: cells are ~1:2
+				py := cy - k*ooz*(by+uy*tu)   // model y is up
+				if px < 0 || py < 0 || px >= fc || py >= fr {
+					continue
+				}
+				idx := int(py)*s.cols + int(px)
+				if ooz <= s.zbuf[idx] {
+					continue
+				}
+				s.zbuf[idx] = ooz
+				s.lum[idx] = li
+			}
 		}
-		idx := int(sy)*s.cols + int(sx)
-		// Depth test on 1/z: larger is nearer; one compare, no division.
-		if ooz <= s.zbuf[idx] {
-			continue
-		}
-		s.zbuf[idx] = ooz
-		nx, ny, nz := rot(s.surf[i].n)
-		l := nx*light[0] + ny*light[1] + nz*light[2]
-		if l <= 0 {
-			// Facing away from the light. Still claim the depth slot: it is
-			// genuinely the nearest surface, and leaving it free lets the FAR
-			// side of the solid show through the near one.
-			s.lum[idx] = 0
-			continue
-		}
-		s.lum[idx] = uint8(min(l*top+lift, top))
 	}
 }
 
