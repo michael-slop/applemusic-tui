@@ -38,6 +38,20 @@ var themes = []theme{
 	// slop: the house palette (slop/pkg/theme Dark) -- spectral green over bone
 	// and stone, deepening to the flame ramp's teal.
 	{"slop", "#62E670", "#C8FFD0", "#3D8FA8", "#D8D4C4", "#ACA4C8", "#5C6470", "#26333F", "#1A2430"},
+	// The IDE classics, each read off its own published palette and mapped to
+	// amtui's slots: accent / accent hi / accent lo (the visualizer's ramp),
+	// text / dim / faint, border, selection.
+	{"tokyo-night", "#7AA2F7", "#7DCFFF", "#3D59A1", "#C0CAF5", "#A9B1D6", "#565F89", "#3B4261", "#283457"},
+	{"dracula", "#BD93F9", "#FF79C6", "#6272A4", "#F8F8F2", "#C9CBDA", "#6272A4", "#44475A", "#383A4A"},
+	{"one-dark", "#61AFEF", "#56B6C2", "#3B6EA8", "#D7DAE0", "#ABB2BF", "#5C6370", "#4B5263", "#3E4451"},
+	{"rose-pine", "#C4A7E7", "#EBBCBA", "#31748F", "#E0DEF4", "#908CAA", "#6E6A86", "#403D52", "#26233A"},
+	{"kanagawa", "#7E9CD8", "#7FB4CA", "#2D4F67", "#DCD7BA", "#C8C093", "#727169", "#363646", "#223249"},
+	{"everforest", "#A7C080", "#83C092", "#56704E", "#D3C6AA", "#9DA9A0", "#7A8478", "#475258", "#3D484D"},
+	{"solarized", "#268BD2", "#2AA198", "#6C71C4", "#93A1A1", "#839496", "#586E75", "#586E75", "#073642"},
+	{"monokai-pro", "#FFD866", "#FC9867", "#FF6188", "#FCFCFA", "#939293", "#727072", "#403E41", "#5B595C"},
+	{"github-dark", "#58A6FF", "#79C0FF", "#1F6FEB", "#E6EDF3", "#8B949E", "#6E7681", "#30363D", "#21262D"},
+	{"ayu-mirage", "#FFCC66", "#FFD173", "#FFAD66", "#CCCAC2", "#B8B5AD", "#707A8C", "#434D5E", "#33415E"},
+	{"night-owl", "#82AAFF", "#7FDBCA", "#C792EA", "#D6DEEB", "#9FB0C0", "#637777", "#2E4A5F", "#1D3B53"},
 	{"auto", "#FA233B", "#FB5C74", "#8A1E30", "#F2F2F7", "#8E8E93", "#5A5A5E", "#3A3A3C", "#2C2C2E"},
 }
 

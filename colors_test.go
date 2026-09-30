@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	colorful "github.com/lucasb-eyer/go-colorful"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -95,5 +97,30 @@ func TestPresetRowSelectsTheHousePalette(t *testing.T) {
 	m = press(t, m, "enter")
 	if m.themeName != "slop" || accent != "#62E670" {
 		t.Fatalf("expected the slop house theme, got %q accent %s", m.themeName, accent)
+	}
+}
+
+// Every preset must be usable: valid colours, a unique name, and text that
+// reads against the selection background.
+func TestEveryThemePresetIsUsable(t *testing.T) {
+	seen := map[string]bool{}
+	for _, th := range themes {
+		if seen[th.name] {
+			t.Fatalf("duplicate theme name %q", th.name)
+		}
+		seen[th.name] = true
+		for i := range 8 {
+			if _, err := colorful.Hex(string(*th.slot(i))); err != nil {
+				t.Fatalf("%s: slot %s is not a colour: %q", th.name, slotNames[i], *th.slot(i))
+			}
+		}
+		text, _ := colorful.Hex(string(th.fgBright))
+		sel, _ := colorful.Hex(string(th.selBg))
+		if _, _, lt := text.Hcl(); func() bool { _, _, ls := sel.Hcl(); return lt-ls < 0.35 }() {
+			t.Errorf("%s: text %s does not stand out from the selection %s", th.name, th.fgBright, th.selBg)
+		}
+	}
+	if len(themes) < 18 {
+		t.Fatalf("expected the IDE presets to be registered, have %d themes", len(themes))
 	}
 }
