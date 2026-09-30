@@ -12,6 +12,31 @@
 //   - Palette. Colours come from amtui's current theme (see Palette), so the
 //     colour controller recolours every effect. Effects keep their panefx
 //     shapes and ramps' STRUCTURE (dark -> bright), not their hard-coded hues.
+//
+// # The torus blueprint (2026-09-29)
+//
+// The first ports kept panefx's own motion (random fire seeding, churning
+// plasma, flying stars) and bolted the music on top; watching them, the music
+// got lost in motion it did not cause. amtui's torus is the model instead,
+// and every effect here must follow it:
+//
+//  1. Shape IS the spectrum. Every band owns a region of the picture (a slice
+//     of ring, a column, a radius, a direction) and that region's size or
+//     brightness is the band's level: Audio.BandAt(s) at the region's
+//     position s. (The torus: tube radius 0.55+0.85*band at that angle.)
+//  2. The only free motion is rigid: a steady rotation or scroll of the whole
+//     frame, like the torus's spin, advanced by DT (which amtui already
+//     scales to the music's pace). No churn of its own.
+//  3. Silence is a resting silhouette -- the thin torus -- not blank, and not
+//     moving except for that rigid rotation.
+//  4. The beat (Kick) is a global pulse: a breath, a spin impulse, a flash.
+//  5. Nothing random unless a band causes it (a star launches because its
+//     band is up). Any texture noise is fixed in space and seeded by a
+//     constant.
+//
+// Effects read React / Bass / Mid / Treble / Kick (reactive, slider-scaled:
+// all at rest when paused or at reactivity 0), never the absolute Bands.
+// TestEveryRegisteredEffectConforms enforces rules 1-3 and 5.
 package fx
 
 import (
@@ -93,6 +118,14 @@ type Effect interface {
 	// Cell returns the glyph and colour at (col, row); ok=false leaves the
 	// cell blank. col in [0, cols), row in [0, rows).
 	Cell(col, row int) (ch rune, c RGB, ok bool)
+}
+
+// FreeMover is implemented by effects whose picture moves even on a steady
+// spectrum, and says how: "spin" / "scroll" for a rigid rotation or scroll of
+// a stable shape (the torus's spin), "particles" for motion the bands
+// themselves launch. Everything else must hold still on a steady spectrum.
+type FreeMover interface {
+	FreeMotion() string
 }
 
 var (
