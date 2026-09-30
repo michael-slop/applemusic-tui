@@ -36,3 +36,14 @@ func TestPickPrefersSyncedWithCloseDuration(t *testing.T) {
 		t.Errorf("pick chose %+v", best)
 	}
 }
+
+func TestLyricsAreComposed(t *testing.T) {
+	synced := ParseLRC("[00:01.00] Danc\u0327a")
+	if len(synced.Lines) != 1 || synced.Lines[0].Text != "Dança" {
+		t.Fatalf("synced line %+v, want the composed \"Dança\"", synced.Lines)
+	}
+	un := plain("FORC\u0327A E UNIA\u0303O")
+	if len(un.Lines) != 1 || un.Lines[0].Text != "FORÇA E UNIÃO" {
+		t.Fatalf("plain line %+v, want the composed form", un.Lines)
+	}
+}

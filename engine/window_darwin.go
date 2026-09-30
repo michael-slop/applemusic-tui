@@ -45,4 +45,4 @@ func (d darwinWindowController) minimize(ctx context.Context) error {
 // cannot fire. Add a recovery here if a parked window ever stalls anyway.
 func (darwinWindowController) ensurePlayable(context.Context) error { return nil }
 
-func defaultWindowController() windowController { return darwinWindowController{} }
+func defaultWindowController(int) windowController { return darwinWindowController{} }

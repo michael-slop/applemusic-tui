@@ -56,12 +56,12 @@ func TestNewWindowControllerSelectsHyprlandOnlyWithSignatureAndPID(t *testing.T)
 	if _, ok := newWindowController(42).(hyprlandWindowController); !ok {
 		t.Fatal("want hyprland controller with signature set and pid known")
 	}
-	if got := newWindowController(0); got != defaultWindowController() {
+	if got := newWindowController(0); got != defaultWindowController(0) {
 		t.Fatalf("controller with unknown pid = %T, want the platform default", got)
 	}
 
 	t.Setenv("HYPRLAND_INSTANCE_SIGNATURE", "")
-	if got := newWindowController(42); got != defaultWindowController() {
+	if got := newWindowController(42); got != defaultWindowController(42) {
 		t.Fatalf("controller outside Hyprland = %T, want the platform default", got)
 	}
 }
@@ -72,7 +72,7 @@ func TestNewWindowControllerFallsBackWithoutHyprctl(t *testing.T) {
 	t.Cleanup(func() { hyprctlAvailable = origLook })
 
 	t.Setenv("HYPRLAND_INSTANCE_SIGNATURE", "sig")
-	if got := newWindowController(42); got != defaultWindowController() {
+	if got := newWindowController(42); got != defaultWindowController(42) {
 		t.Fatalf("controller without hyprctl = %T, want the platform default", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	cdpnetwork "github.com/chromedp/cdproto/network"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"golang.org/x/text/unicode/norm"
 )
 
 type Track struct {
@@ -131,19 +133,44 @@ func closeAll(cancels []context.CancelFunc) {
 }
 
 func open(dir string, visible bool) (context.Context, []context.CancelFunc, error) {
-	ctx, cancels := launch(dir, visible)
-	if err := chromedp.Run(ctx, chromedp.Navigate("https://music.apple.com/")); err != nil {
+	if err := clearStaleBrowser(dir); err != nil {
+		return nil, nil, err
+	}
+	// A second, fresh browser gets past a start that lost its first tab
+	// ("inspected target navigated or closed"), seen once on Windows and not
+	// reproduced since; the log records which attempt failed and why.
+	var ctx context.Context
+	var cancels []context.CancelFunc
+	var err error
+	for attempt := 1; attempt <= 2; attempt++ {
+		ctx, cancels = launch(dir, visible)
+		if err = chromedp.Run(ctx); err == nil {
+			break
+		}
+		log.Printf("browser start %d (visible=%v) failed: %v", attempt, visible, err)
 		closeAll(cancels)
+	}
+	if err != nil {
 		return nil, nil, fmt.Errorf("launching browser: %w (set AMTUI_CHROME to your Chrome binary if not found)", err)
 	}
+	log.Printf("browser started: pid %d, visible=%v", browserPID(ctx), visible)
+	tieBrowserToProcess(browserPID(ctx))
+	// Park before loading the site: a tiling window manager grabs the new
+	// window at once, and music.apple.com can take seconds to load.
 	if !visible {
 		tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := newWindowController(browserPID(ctx)).parkOffscreen(tctx)
 		cancel()
 		if err != nil {
+			log.Printf("parking browser window: %v", err)
 			closeAll(cancels)
 			return nil, nil, fmt.Errorf("parking browser window: %w", err)
 		}
+	}
+	if err := chromedp.Run(ctx, chromedp.Navigate("https://music.apple.com/")); err != nil {
+		log.Printf("loading music.apple.com: %v", err)
+		closeAll(cancels)
+		return nil, nil, fmt.Errorf("loading music.apple.com: %w", err)
 	}
 	return ctx, cancels, nil
 }
@@ -411,7 +438,17 @@ func (e *Engine) evalJSONLocked(js string, out any) error {
 	if err := chromedp.Run(tctx, chromedp.Evaluate(js, &raw, awaitPromise)); err != nil {
 		return err
 	}
-	return json.Unmarshal([]byte(raw), out)
+	return decodeJSON(raw, out)
+}
+
+// decodeJSON unmarshals MusicKit's JSON with every string composed (NFC).
+// Apple Music serves some titles decomposed, e.g. "Dança" as "Danc" plus a
+// combining cedilla (U+0327). The layout counts that mark as zero width, but
+// Windows' inbox console gives it a cell of its own, so a full-width row holding
+// it wraps and the whole TUI scrolls on every frame. Composed, "ç" is one cell
+// everywhere.
+func decodeJSON(raw string, out any) error {
+	return json.Unmarshal(norm.NFC.Bytes([]byte(raw)), out)
 }
 
 type jsTrack struct {

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 type Line struct {
@@ -99,7 +101,7 @@ var lrcLine = regexp.MustCompile(`^\[(\d+):(\d+)(?:\.(\d+))?\](.*)$`)
 // ParseLRC parses "[mm:ss.xx] text" lines; malformed lines are skipped.
 func ParseLRC(src string) Lyrics {
 	var lines []Line
-	for _, raw := range strings.Split(src, "\n") {
+	for _, raw := range strings.Split(norm.NFC.String(src), "\n") {
 		m := lrcLine.FindStringSubmatch(strings.TrimSpace(raw))
 		if m == nil {
 			continue
@@ -117,9 +119,12 @@ func ParseLRC(src string) Lyrics {
 	return Lyrics{Synced: len(lines) > 0, Lines: lines}
 }
 
+// Lyrics are composed (NFC) for the same reason as engine.decodeJSON: a
+// combining mark takes a cell of its own in Windows' inbox console, so a
+// decomposed line is wider there than the layout measured.
 func plain(src string) Lyrics {
 	var lines []Line
-	for _, l := range strings.Split(src, "\n") {
+	for _, l := range strings.Split(norm.NFC.String(src), "\n") {
 		lines = append(lines, Line{At: -1, Text: strings.TrimSpace(l)})
 	}
 	return Lyrics{Lines: lines}
