@@ -29,12 +29,13 @@
 //     scales to the music's pace). No churn of its own.
 //  3. Silence is a resting silhouette -- the thin torus -- not blank, and not
 //     moving except for that rigid rotation.
-//  4. The beat (Kick) is a global pulse: a breath, a spin impulse, a flash.
+//  4. The beat (Kick, and the hi-hat, Hat) is a pulse: a breath, a spin
+//     impulse, a flash, a burst from lanes a band already lights.
 //  5. Nothing random unless a band causes it (a star launches because its
 //     band is up). Any texture noise is fixed in space and seeded by a
 //     constant.
 //
-// Effects read React / Bass / Mid / Treble / Kick (reactive, slider-scaled:
+// Effects read React / Bass / Mid / Treble / Kick / Hat (reactive, slider-scaled:
 // all at rest when paused or at reactivity 0), never the absolute Bands.
 // TestEveryRegisteredEffectConforms enforces rules 1-3 and 5.
 package fx
@@ -62,7 +63,7 @@ func (c RGB) Scale(k float64) RGB {
 }
 
 // Audio is what an effect hears each frame. Every field is already scaled by
-// amtui's reactivity slider: at Reactivity 0, React is all 0.5 and Kick is 0.
+// amtui's reactivity slider: at Reactivity 0, React is all 0.5 and Kick and Hat are 0.
 type Audio struct {
 	Bands      [32]float64 // absolute analyzer levels 0..1 (25 Hz .. 16 kHz, log-spaced)
 	React      [32]float64 // per-band change vs its own recent average, 0..1, rests at 0.5
@@ -70,7 +71,8 @@ type Audio struct {
 	Bass       float64     // mean React of bands 0-5 (~25-250 Hz), rests at 0.5
 	Mid        float64     // mean React of bands 6-19
 	Treble     float64     // mean React of bands 20-31
-	Kick       float64     // beat pulse 0..1: jumps on a bass hit, decays over ~0.3 s
+	Kick       float64     // beat pulse 0..1: jumps on a kick drum (visualizer/onset.go), decays over ~0.15-0.3 s
+	Hat        float64     // hi-hat pulse 0..1: jumps on a hi-hat hit, decays over ~0.15 s; 0 without live audio
 	Playing    bool        // false when paused (effects should keep their idle motion)
 	Reactivity float64     // the slider itself, 0..1 (0.5 = default)
 	DT         float64     // seconds since the previous Step, at the music's pace (4% speed when silent/paused)

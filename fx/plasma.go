@@ -35,7 +35,8 @@ package fx
 // outward -- every ring is pushed out by up to 18%, like the sphere's latitudes
 // -- and flashes it up to 25% brighter, fading with the kick. In silence React
 // decays to 0 and every ring goes dark, leaving a faint resting disc at the
-// centre that only the slow texture spin touches.
+// centre that only the slow texture spin touches. A hi-hat (Audio.Hat)
+// flashes the outer rings — the treble's — up to 35 % brighter.
 
 import "math"
 
@@ -51,6 +52,8 @@ const (
 	plasmaRestR  = 0.35 // resting disc radius (fraction of the full disc)
 	plasmaCut    = 0.07 // brightness below this is not drawn
 	plasmaEdge   = 0.06 // the disc fades out over this much radius past 1
+	plasmaHat    = 0.35 // how much brighter a full hi-hat makes the outer rings
+	plasmaHatR   = 0.55 // the hi-hat's flash starts here and is full at the rim
 )
 
 type plasma struct {
@@ -65,6 +68,7 @@ type plasma struct {
 
 	lut  [ptsColourSteps]RGB
 	kick float64 // smoothed
+	hat  float64 // smoothed
 }
 
 func newPlasma() Effect { return &plasma{} }
@@ -133,13 +137,14 @@ func plasmaTexture(r, phi float64) float64 {
 
 func (p *plasma) Step(a Audio) {
 	dt := ptsDT(a)
-	var kick float64
+	var kick, hat float64
 	if a.Playing {
-		kick = a.Kick
+		kick, hat = a.Kick, a.Hat
 	}
 	// Kick already decays over ~0.3 s; follow it quickly so the breath lands
 	// on the beat.
 	p.kick = ptsGlide(p.kick, kick, dt, 0.05)
+	p.hat = ptsGlide(p.hat, hat, dt, 0.03)
 	p.theta = math.Mod(p.theta+dt*plasmaSpin, 2*math.Pi)
 
 	breath := 1 / (1 + plasmaBreath*p.kick)
@@ -154,7 +159,10 @@ func (p *plasma) Step(a Audio) {
 		}
 		edge := min(max((1+plasmaEdge-r)/plasmaEdge, 0), 1)
 		tex := plasmaTexture(r, p.ang[i]+p.theta)
-		b := a.BandAt(r, false) * (1 - plasmaTex + plasmaTex*tex) * edge * flash
+		// The hi-hat flashes the outer rings, where the treble lives; it scales
+		// a lit ring, so it cannot light one its band left dark.
+		rim := min(max((r-plasmaHatR)/(1-plasmaHatR), 0), 1)
+		b := a.BandAt(r, false) * (1 - plasmaTex + plasmaTex*tex) * edge * flash * (1 + plasmaHat*p.hat*rim)
 		if r < plasmaRestR {
 			b = max(b, plasmaRest*(1-r/plasmaRestR))
 		}

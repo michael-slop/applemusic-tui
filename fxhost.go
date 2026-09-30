@@ -79,7 +79,7 @@ func (m *model) stepFxBy(frames int) {
 	f := m.features()
 	a := fx.Audio{
 		Bands: f.bands, React: f.react, Level: f.level,
-		Bass: f.bass, Mid: f.mid, Treble: f.treble, Kick: f.kick,
+		Bass: f.bass, Mid: f.mid, Treble: f.treble, Kick: f.kick, Hat: f.hat,
 		Playing: f.playing, Reactivity: m.reactivity,
 		// Time itself runs at the music's pace: nearly still when it is off.
 		DT:   float64(frames) / 30 * m.motionSpeed(),

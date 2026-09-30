@@ -125,8 +125,10 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 		} else if frame, ok := service.Latest(); ok {
 			if visualizerFrameStale(now, frame.At) {
 				m.vizTargets = [32]float64{}
+				m.vizOnsets = visualizer.Onsets{}
 			} else {
 				m.vizTargets = frame.Bands
+				m.vizOnsets = frame.Onsets
 				m.vizLive = frame.Live
 				m.vizSource = frame.Source
 				m.vizOpening = false
@@ -144,7 +146,14 @@ func (m *model) stepFrame(now time.Time) tea.Cmd {
 	}
 	decayPeaks(&m.vizPeaks, m.vizBands)
 	m.vizReact.update(m.vizBands)
-	m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
+	if m.useOnsets() {
+		// The kick drum's onset (visualizer/onset.go): on a real song it found
+		// the kicks bassKick missed, twice as soon. bassKick stays for the
+		// simulated spectrum and for visualizer.onsets = false.
+		m.orbKick = m.vizOnsets.Kick
+	} else {
+		m.orbKickBase, m.orbKick = bassKick(m.orbKickBase, m.orbKick, bassLevel(m.vizBands))
+	}
 	m.advanceMotion()
 	m.orbSpin, m.orbWobble = orbAdvanceAt(m.orbSpin, m.orbWobble, m.shapeKick(), m.motionSpeed())
 	if m.st.Dur > 0 && m.st.Playing {
@@ -249,13 +258,14 @@ type model struct {
 	vizTerminal bool
 	vizBands    [32]float64 // smoothed, 0..1
 	vizTargets  [32]float64
-	vizPeaks    [32]float64 // peak-hold markers, decay slowly
-	vizMode     int         // vizBars or vizOrb, persisted across runs
-	orbSpin     float64     // torus rotation, accelerated by the beat
-	orbWobble   float64     // torus tilt oscillation
-	orbKick     float64     // 0..1 beat strength, spikes on a bass hit
-	orbKickBase float64     // running average the kick is measured against
-	wv          wave        // recorded loudness across the current track
+	vizPeaks    [32]float64       // peak-hold markers, decay slowly
+	vizMode     int               // vizBars or vizOrb, persisted across runs
+	orbSpin     float64           // torus rotation, accelerated by the beat
+	orbWobble   float64           // torus tilt oscillation
+	orbKick     float64           // 0..1 beat strength, spikes on a bass hit
+	orbKickBase float64           // running average the kick is measured against
+	vizOnsets   visualizer.Onsets // drum-hit pulses from the live analyzer (visualizer/onset.go)
+	wv          wave              // recorded loudness across the current track
 
 	helpOpen bool // the ? overlay; any key dismisses it
 

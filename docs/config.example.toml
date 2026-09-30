@@ -18,6 +18,7 @@ name = "apple"
 [visualizer]
 peaks = true   # falling peak markers above the spectrum bars
 pulse = true   # accent brightness pulses with the bass
+onsets = true  # beats from drum-hit detection (kick, hi-hat); false = the old bass-level kick
 wave  = true   # progress bar drawn as the played waveform
 
 # The shape — bars, torus or sphere — is not set here. Press "v" to cycle it;

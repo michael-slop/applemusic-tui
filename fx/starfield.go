@@ -48,12 +48,14 @@ const (
 	starBands = 32
 	starLanes = 2 * starBands // each band emits both left and right
 
-	starRate  = 6.0  // launches per second per lane at full level (per 20 cells of radius)
-	starFloor = 0.08 // a band at or below this launches nothing
-	starSpeed = 0.9  // launch speed per unit level, in panel radii per second
-	starSlow  = 0.4  // launch speed at level 0, panel radii per second
-	starWarp  = 2.0  // extra speed a full kick adds (x)
-	starRest  = 0.14 // brightness of the resting ring
+	starRate    = 6.0  // launches per second per lane at full level (per 20 cells of radius)
+	starFloor   = 0.08 // a band at or below this launches nothing
+	starSpeed   = 0.9  // launch speed per unit level, in panel radii per second
+	starSlow    = 0.4  // launch speed at level 0, panel radii per second
+	starWarp    = 2.0  // extra speed a full kick adds (x)
+	starHatBand = 20   // lanes of this band and up burst on a hi-hat (Treble's bands)
+	starHatJump = 0.25 // a Hat rise this big is a new hit
+	starRest    = 0.14 // brightness of the resting ring
 )
 
 // star is one particle: distance travelled along its unit direction, in cell
@@ -75,6 +77,7 @@ type starfield struct {
 
 	lut  [ptsColourSteps]RGB
 	kick float64 // smoothed
+	hat  float64 // last frame's Hat, to see a new hit
 }
 
 func newStarfield() Effect {
@@ -152,7 +155,11 @@ func (s *starfield) Step(a Audio) {
 		i++
 	}
 
-	// Launch: each lane's accumulator fills at its band's rate.
+	// Launch: each lane's accumulator fills at its band's rate. A hi-hat hit
+	// adds one launch to every treble lane its band already lights: a spray on
+	// the hat, caused by the hat, never by a dark band.
+	burst := a.Playing && a.Hat > s.hat+starHatJump
+	s.hat = a.Hat
 	ring := s.ringRadius()
 	for lane := range s.acc {
 		lv := min(max(a.React[laneBand(lane)], 0), 1)
@@ -162,6 +169,9 @@ func (s *starfield) Step(a Audio) {
 		rate := starRate * s.sizeRate() * x * x
 		if rate <= 0 {
 			continue
+		}
+		if burst && laneBand(lane) >= starHatBand {
+			s.acc[lane]++
 		}
 		s.acc[lane] += rate * dt
 		for s.acc[lane] >= 1 {

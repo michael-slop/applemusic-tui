@@ -110,3 +110,25 @@ func TestStarfieldStepDoesNotAllocate(t *testing.T) {
 		t.Fatalf("Step allocated %v times", n)
 	}
 }
+
+func TestStarfieldHatBurstsOnlyFromLitTrebleLanes(t *testing.T) {
+	burst := func(trebleLevel float64) (quiet, hat int) {
+		q, h := builtStarfield(80, 30), builtStarfield(80, 30)
+		a := ptsBands(0.3, 20, 31, trebleLevel)
+		for range 5 {
+			q.Step(a)
+			h.Step(a)
+		}
+		withHat := a
+		withHat.Hat = 1
+		q.Step(a)
+		h.Step(withHat)
+		return len(q.stars), len(h.stars)
+	}
+	if q, h := burst(0.8); h < q+2*(starBands-starHatBand) {
+		t.Fatalf("lit treble: a hi-hat launched %d extra stars, want one per lit treble lane (%d)", h-q, 2*(starBands-starHatBand))
+	}
+	if q, h := burst(0); h != q {
+		t.Fatalf("dark treble: a hi-hat launched %d stars; a dark band must launch nothing", h-q)
+	}
+}

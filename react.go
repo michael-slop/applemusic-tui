@@ -48,6 +48,7 @@ func (r *reactive) update(b [32]float64) [32]float64 {
 	for i, v := range b {
 		d := v - r.mean[i]
 		r.mean[i] += d * reactMemory
+
 		r.dev[i] += (math.Abs(d) - r.dev[i]) * reactMemory
 		if v < reactQuiet {
 			r.out[i] *= 0.85 // silence: fall away rather than chase the noise floor
@@ -76,7 +77,8 @@ type audioFeatures struct {
 	bass    float64     // reactive, bands 0-5 (~25-250 Hz)
 	mid     float64     // reactive, bands 6-19
 	treble  float64     // reactive, bands 20-31
-	kick    float64     // beat pulse from bassKick, 0..1
+	kick    float64     // beat pulse, 0..1 (the kick drum's onset; bassKick without live audio)
+	hat     float64     // hi-hat pulse, 0..1 (0 without live audio)
 	playing bool
 }
 
@@ -97,6 +99,7 @@ func (m *model) features() audioFeatures {
 		mid:     rangeMean(m.shapeBands(), 6, 19),
 		treble:  rangeMean(m.shapeBands(), 20, 31),
 		kick:    m.shapeKick(),
+		hat:     m.shapeHat(),
 		playing: m.st.Playing,
 	}
 }
@@ -130,6 +133,22 @@ func (m model) shapeBands() [32]float64 {
 
 // shapeKick is the beat pulse scaled by the slider.
 func (m model) shapeKick() float64 { return min(1, m.orbKick*m.reactScale()) }
+
+// useOnsets reports whether the beat comes from the onset detector: only with
+// live audio (the simulated spectrum has no hits to find), and not when the
+// config turns it off (visualizer.onsets = false restores bassKick).
+func (m model) useOnsets() bool {
+	return m.vizLive && configBool(m.cfg, "visualizer.onsets", true)
+}
+
+// shapeHat is the hi-hat pulse scaled by the slider; 0 unless onsets are on
+// and the audio is live.
+func (m model) shapeHat() float64 {
+	if !m.useOnsets() {
+		return 0
+	}
+	return min(1, m.vizOnsets.Hat*m.reactScale())
+}
 
 func reactivityFile() string {
 	d := configDir()

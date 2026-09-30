@@ -210,3 +210,24 @@ func TestPlasmaSquareRadiusRunsCentreToCorner(t *testing.T) {
 		t.Fatalf("edge-middle radii = %v, %v, want equal ~0.84", a, b)
 	}
 }
+
+func TestPlasmaHatFlashesTheRimNotTheCentre(t *testing.T) {
+	const w, h = 60, 20
+	quiet, hat := builtPlasma(w, h), builtPlasma(w, h)
+	// Every band lit, mid-level: the flash has headroom below the clamp at 1.
+	a := ptsBands(0.5, 0, 31, 0.5)
+	for range 10 {
+		quiet.Step(a)
+		withHat := a
+		withHat.Hat = 1
+		hat.Step(withHat)
+	}
+	centre := func(c, r int) bool { return quiet.rad[r*w+c] < 0.4 }
+	rim := func(c, r int) bool { return quiet.rad[r*w+c] > 0.8 && quiet.rad[r*w+c] < 1 }
+	if qc, hc := ptsWeightWhere(quiet, w, h, centre), ptsWeightWhere(hat, w, h, centre); qc != hc {
+		t.Fatalf("the hi-hat changed the centre: %.2f -> %.2f", qc, hc)
+	}
+	if qr, hr := ptsWeightWhere(quiet, w, h, rim), ptsWeightWhere(hat, w, h, rim); hr <= qr*1.10 {
+		t.Fatalf("the hi-hat did not brighten the rim: %.2f -> %.2f", qr, hr)
+	}
+}
