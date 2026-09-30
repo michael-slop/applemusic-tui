@@ -73,7 +73,12 @@ type Audio struct {
 	Kick       float64     // beat pulse 0..1: jumps on a bass hit, decays over ~0.3 s
 	Playing    bool        // false when paused (effects should keep their idle motion)
 	Reactivity float64     // the slider itself, 0..1 (0.5 = default)
-	DT         float64     // seconds since the previous Step (1/30 at full rate)
+	DT         float64     // seconds since the previous Step, at the music's pace (4% speed when silent/paused)
+	// Wall is real seconds since the previous Step, NOT scaled by the music's
+	// pace. History effects (fire, tunnel, waves) scroll the song's spectra on
+	// it, so on pause the silence flushes the old music out in a second or
+	// two and the picture then holds still; rigid spins use DT. 0 = use DT.
+	Wall float64
 }
 
 // Drive is a convenience for effects: how far a rest-at-0.5 value sits above

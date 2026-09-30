@@ -73,10 +73,14 @@ func wavGlide(cur, target, dt, tau float64) float64 {
 // wavDT is the frame's elapsed time, clamped so a stalled frame cannot fling
 // the landscape forward.
 func wavDT(a Audio) float64 {
-	if !(a.DT > 0) {
+	dt := a.DT
+	if a.Wall > 0 {
+		dt = a.Wall // the song's stream scrolls in real time (see Audio.Wall)
+	}
+	if !(dt > 0) {
 		return 0
 	}
-	return min(a.DT, 0.25)
+	return min(dt, 0.25)
 }
 
 // wavBand is Audio.BandAt(s, false) for a stored spectrum.

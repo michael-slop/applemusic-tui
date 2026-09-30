@@ -93,7 +93,11 @@ func (f *fire) Step(a Audio) {
 	f.kick = min(max(a.Kick, 0), 1)
 	// One spectrum per fireStep of music time; after a stall, never push
 	// more than the history can hold.
-	f.acc += max(a.DT, 0)
+	dt := a.DT
+	if a.Wall > 0 {
+		dt = a.Wall // the song's stream scrolls in real time (see Audio.Wall)
+	}
+	f.acc += min(max(dt, 0), 0.25)
 	for n := 0; f.acc >= fireStep; n++ {
 		f.acc -= fireStep
 		if n < f.hist.Depth() {

@@ -73,11 +73,22 @@ func TestFxAlmostStillWhenPaused(t *testing.T) {
 		now := time.Now()
 		m.stepFrame(now)
 		_ = m.View()
-		for range 150 {
+		// Real music changes every frame; a constant spectrum would (by the
+		// torus blueprint) draw a still picture even while playing.
+		song := func(i int) {
+			if playing {
+				for b := range m.vizTargets {
+					m.vizTargets[b] = 0.5 + 0.4*math.Sin(float64(i)*0.3+float64(b)*0.7)
+				}
+			}
+		}
+		for i := range 150 {
+			song(i)
 			m.stepFrame(now) // let the speed settle
 		}
 		a := fx.Render(m.fx.eff, m.fx.cols, m.fx.rows, 3)
-		for range 30 {
+		for i := range 30 {
+			song(150 + i)
 			m.stepFrame(now)
 		}
 		b := fx.Render(m.fx.eff, m.fx.cols, m.fx.rows, 3)
