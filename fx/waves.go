@@ -40,10 +40,10 @@ package fx
 import "math"
 
 const (
-	wavStep  = 0.1  // seconds of music between ridges
-	wavMax   = 24   // most ridges drawn
+	wavStep  = 0.05 // seconds of music between ridges (half of 0.1: twice the lines over the same stretch of song)
+	wavMax   = 48   // most ridges drawn (one per row up to 48)
 	wavPersp = 0.15 // ridge j sits at depth 1 + j·wavPersp
-	wavAmp   = 0.55 // the nearest ridge at full level rises this much of the panel
+	wavAmp   = 0.45 // the nearest ridge at full level rises this much of the panel (0.55 hid too many of the denser ridges)
 	wavHoriz = 0.28 // the farthest baseline, as a fraction of the panel from the top
 	wavFlare = 0.35 // how much taller a kick makes the nearest ridge
 	wavGlow  = 0.4  // how much a kick brightens it
@@ -51,7 +51,7 @@ const (
 
 // wavColourSteps is how many distinct colours the theme ramp is sampled into:
 // Render emits one escape per colour run, so a small table keeps runs long.
-const wavColourSteps = 16
+const wavColourSteps = 64 // fine enough that 48 ridges each get their own shade
 
 func wavLUT(p Palette) (lut [wavColourSteps]RGB) {
 	for i := range lut {
@@ -133,8 +133,10 @@ func (w *waves) Resize(cols, rows int) {
 		return
 	}
 	w.cols, w.rows = cols, rows
-	// About one ridge per two rows: flat lines closer than that would merge.
-	w.n = min(max((rows+1)/2, 1), wavMax)
+	// About one ridge per row. Perspective packs the far ones toward the
+	// horizon and occlusion keeps them apart, so the extra lines add shades
+	// to the gradient without flattening the depth.
+	w.n = min(max(rows, 1), wavMax)
 	w.ys, w.lv = make([]float64, w.n*cols), make([]float64, w.n*cols)
 	w.top = make([]int, cols)
 	w.cells = make([]wavCell, cols*rows)
@@ -233,11 +235,14 @@ func (w *waves) Step(a Audio) {
 			ry := int(math.Floor(y))
 			rt := min(ry, int(math.Floor(lo+0.5)))
 			rb := max(ry, int(math.Floor(hi-0.5)))
-			v := bright * (0.1 + 0.9*w.lv[i])
+			// Colour walks the ramp by depth first (far = dark end, near =
+			// bright end), and the band level lifts it within that: every
+			// ridge gets its own shade, so the gradient reads as depth.
+			v := bright * (0.05 + 0.95*w.lv[i])
 			if j == 0 {
 				v += wavGlow * w.kick
 			}
-			col := wavLUTAt(&w.lut, 0.15+0.85*min(v, 1))
+			col := wavLUTAt(&w.lut, 0.08+0.92*min(v, 1))
 			for r := max(rt, 0); r <= rb && r < w.top[c]; r++ {
 				var ch rune
 				switch {

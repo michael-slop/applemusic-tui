@@ -183,12 +183,14 @@ func TestWavesKickFlaresTheNearestRidge(t *testing.T) {
 // The landscape rolls back on music time, not frames.
 func TestWavesIsPacedByTimeNotFrameCount(t *testing.T) {
 	fast, slow := builtWaves(30, 12), builtWaves(30, 12)
-	for i := range 50 {
+	// Music changes every wavStep; the fast run takes five frames per step,
+	// the slow run one, so both see the same music at the same instants.
+	for i := range 100 {
 		a := loud(i / 5)
-		a.Kick, a.DT = 0, 0.02
+		a.Kick, a.DT = 0, wavStep/5
 		fast.Step(a)
 		if i%5 == 4 {
-			a.DT = 0.1
+			a.DT = wavStep
 			slow.Step(a)
 		}
 	}
