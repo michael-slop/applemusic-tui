@@ -106,7 +106,7 @@
 ### Готовые бинарники
 
 Возьмите архив под свою платформу в
-[последнем релизе](https://github.com/k1y0miiii/applemusic-tui/releases/latest) —
+[последнем релизе](https://github.com/michael-slop/applemusic-tui/releases/latest) —
 macOS (Apple Silicon / Intel), Linux (x86-64 / arm64) и Windows
 (x86-64 / arm64):
 
@@ -125,7 +125,7 @@ amtui --version
 ### Из исходников
 
 ```sh
-git clone https://github.com/k1y0miiii/applemusic-tui
+git clone https://github.com/michael-slop/applemusic-tui
 cd applemusic-tui
 ./install.sh
 ```

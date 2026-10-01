@@ -205,7 +205,7 @@ then, run `& "$env:LOCALAPPDATA\Programs\amtui\amtui.exe"`.
 ### Prebuilt binaries
 
 Grab the archive for your platform from the
-[latest release](https://github.com/k1y0miiii/applemusic-tui/releases/latest) —
+[latest release](https://github.com/michael-slop/applemusic-tui/releases/latest) —
 macOS (Apple Silicon / Intel), Linux (x86-64 / arm64) and Windows
 (x86-64 / arm64):
 
@@ -223,7 +223,7 @@ macOS binaries are unsigned, so the first launch needs
 ### From source
 
 ```sh
-git clone https://github.com/k1y0miiii/applemusic-tui
+git clone https://github.com/michael-slop/applemusic-tui
 cd applemusic-tui
 ./install.sh
 ```
