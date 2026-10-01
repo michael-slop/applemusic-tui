@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"image"
 	_ "image/jpeg" // Apple serves JPEG artwork
 	_ "image/png"  // …but decode PNG too rather than fail
+	"net"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -53,7 +56,46 @@ func artworkURL(template string, px int) string {
 	return artworkPlaceholder.ReplaceAllString(r.Replace(template), "")
 }
 
+// artworkRetryDelays are the pauses before asking again. Apple's image server
+// has refused a playlist cover (HTTP 403) and served the same URL moments
+// later, and a single refusal used to leave that tile blank for the session.
+var artworkRetryDelays = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond}
+
+// fetchArtwork downloads and decodes a cover, asking again after a failure
+// that can pass (network, 403, 404, 408, 429, 5xx) — not after one that cannot
+// (a response that is not an image).
 func fetchArtwork(ctx context.Context, url string) (image.Image, error) {
+	img, err := fetchArtworkOnce(ctx, url)
+	for _, d := range artworkRetryDelays {
+		if err == nil || !artworkRetryable(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(d):
+		}
+		img, err = fetchArtworkOnce(ctx, url)
+	}
+	return img, err
+}
+
+// artworkStatusError is a non-200 answer from the image server.
+type artworkStatusError int
+
+func (e artworkStatusError) Error() string { return fmt.Sprintf("artwork: HTTP %d", int(e)) }
+
+func artworkRetryable(err error) bool {
+	var status artworkStatusError
+	if errors.As(err, &status) {
+		s := int(status)
+		return s == 403 || s == 404 || s == 408 || s == 429 || s >= 500
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+func fetchArtworkOnce(ctx context.Context, url string) (image.Image, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -63,6 +105,11 @@ func fetchArtwork(ctx context.Context, url string) (image.Image, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	// Checked before decoding: a refusal used to surface as "image: unknown
+	// format", which named the wrong problem.
+	if resp.StatusCode != http.StatusOK {
+		return nil, artworkStatusError(resp.StatusCode)
+	}
 	img, _, err := image.Decode(resp.Body)
 	return img, err
 }

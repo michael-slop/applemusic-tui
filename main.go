@@ -548,14 +548,16 @@ func fetchTileArtCmd(id, template string) tea.Cmd {
 }
 
 // fetchTileArtCmds fires one fetch per entry that has an artwork template and no
-// cover yet. Bubble Tea runs the batch concurrently.
+// cover yet. Bubble Tea runs the batch concurrently. A tile whose fetch failed
+// (a nil entry) is asked for again: it used to be marked tried for good, so one
+// refused download left a playlist's tile blank for the whole session.
 func (m model) fetchTileArtCmds() []tea.Cmd {
 	var cmds []tea.Cmd
 	for _, tr := range m.recent {
 		if tr.Art == "" {
 			continue
 		}
-		if _, done := m.tileArt[tr.ID]; done {
+		if img := m.tileArt[tr.ID]; img != nil {
 			continue
 		}
 		cmds = append(cmds, fetchTileArtCmd(tr.ID, tr.Art))
