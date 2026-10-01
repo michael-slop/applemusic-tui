@@ -35,6 +35,12 @@ func (c mprisControls) eng(intent wakeIntent) *engine.Engine {
 	return nil
 }
 
+// Asleep reports whether the browser is asleep (no live engine). Windows holds
+// the media keys only then (mpris/mediakeys_windows.go). It is polled from that
+// listener's own goroutine, where a panic would take amtui down, so controls
+// with no engine reference at all count as awake and claim nothing.
+func (c mprisControls) Asleep() bool { return c.ref != nil && c.ref.Load() == nil }
+
 func (c mprisControls) PlayPause() error {
 	if e := c.eng(wakeIntent{play: true, jump: -1}); e != nil {
 		return e.PlayPause()

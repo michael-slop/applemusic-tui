@@ -128,8 +128,16 @@ func TestReadyStartsVisualizerOpenAlongsideInitialStateFetch(t *testing.T) {
 	if !ok {
 		t.Fatalf("ready command returned %T, want tea.BatchMsg", msg)
 	}
-	if len(batch) != 3 {
-		t.Fatalf("ready batch contains %d commands, want 3", len(batch))
+	// Where media keys publish (MPRIS on Linux with a session bus, the
+	// media-key listener on Windows), ready also starts their quit and wake
+	// listeners.
+	want := 3
+	if got.mpris != nil {
+		want += 2
+		got.mpris.Close()
+	}
+	if len(batch) != want {
+		t.Fatalf("ready batch contains %d commands, want %d", len(batch), want)
 	}
 }
 

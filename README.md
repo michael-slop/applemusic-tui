@@ -172,8 +172,9 @@ through the system mixer (the web player serves AAC 256; no lossless).
 > the TUI correctly. The hidden browser stays out of the taskbar, Alt+Tab and
 > tiling window managers (it is parked offscreen as a tool window), and it
 > closes with amtui however amtui exits. Media keys work through Chrome's own
-> Windows media integration while the browser is awake; a media key does not
-> wake a sleeping browser on Windows (press space in amtui).
+> Windows media integration while the browser is awake, and they wake a
+> sleeping browser too: while it sleeps amtui holds play/pause, next and
+> previous itself, and lets them go the moment the browser is back.
 
 ## Install
 

@@ -1,11 +1,12 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package mpris
 
 import "fmt"
 
-// MPRIS is a freedesktop thing. macOS and Windows get a no-op with the same
-// shape so the caller needs no build tags of its own. State and Controls are
+// MPRIS is a freedesktop thing. macOS gets a no-op with the same shape so the
+// caller needs no build tags of its own (Windows has media keys while the
+// browser sleeps: mediakeys_windows.go). State and Controls are
 // shared — only the D-Bus server is Linux-only.
 
 type Server struct{}
