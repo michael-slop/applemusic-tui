@@ -1,4 +1,5 @@
 # build artifacts
+*.test
 amtui
 applemusic-tui
 dist/
