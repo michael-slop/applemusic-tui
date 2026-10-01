@@ -143,6 +143,7 @@ func TestMeshPresetsReplaceTheIDEBlock(t *testing.T) {
 	defer func() { themes = saved }()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows; with HOME alone it read the real presets.conf
 	t.Setenv("OMARCHY_PATH", filepath.Join(home, "omarchy"))
 	write := func(p, s string) {
 		os.MkdirAll(filepath.Dir(p), 0o755)
