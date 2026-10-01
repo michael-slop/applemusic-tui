@@ -581,6 +581,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// real time passed; only the (expensive) redraw rate drops.
 		frames := 1
 		if !m.lastFrame.IsZero() {
+			if m.frameInterval() == activeFrameInterval {
+				noteTick(now.Sub(m.lastFrame), m.vizModeName())
+			}
 			frames = int(now.Sub(m.lastFrame).Seconds()*30 + 0.5)
 			frames = min(max(frames, 1), 30)
 		}
@@ -1725,7 +1728,8 @@ func main() {
 	// Anything written to stderr while the TUI owns the screen lands on top of
 	// it; send the standard logger (chromedp included) to a file instead.
 	engine.OpenLog()
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// timedOutput (perfwatch.go) logs a terminal write that stalls the screen.
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(timedOutput{os.Stdout}))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "amtui:", err)
 		os.Exit(1)
